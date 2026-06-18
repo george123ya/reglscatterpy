@@ -60,7 +60,25 @@ rs.save_html(w, "umap.html")      # or:  w.to_html("umap.html")
 
 The saved file is fully interactive (pan/zoom, legend, lasso, tooltips,
 PNG/SVG/PDF export) but it's a **snapshot** — it has no kernel, so the Python
-round-trips (`w.selection`, `w.annotate`, …) only work in the live notebook.
+round-trips (`w.selection`, `w.annotate`, …) only work in the live notebook. The
+widget bundle is inlined gzip-compressed (~0.5 MB, decompressed in-browser), so
+a one-plot file is well under 1 MB. No R is involved — it's pure Python.
+
+### A whole notebook → one HTML report
+
+Plain `jupyter nbconvert --to html` leaves the plots blank (the same widget-state
+limitation). `save_notebook_html` re-executes the notebook and bakes every plot
+in as an interactive, kernel-free figure, sharing **one** copy of the bundle
+across all plots:
+
+```python
+rs.save_notebook_html("analysis.ipynb", "analysis_report.html")
+```
+
+Needs `nbconvert` + `ipykernel` (`pip install reglscatterpy[report]`). The plots
+are fully offline; note that nbconvert's own page chrome (MathJax/RequireJS) is
+still referenced from a CDN — use [`nb_offline_convert`](https://github.com/trungleduc/nb_offline_convert)
+if you need the surrounding report shell to be 100% offline too.
 
 ## Selection round-trip
 

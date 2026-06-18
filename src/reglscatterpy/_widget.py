@@ -57,6 +57,24 @@ def _make_class():
 
             return save_html(self, path, title=title)
 
+        def _repr_mimebundle_(self, **kwargs):
+            # In a live notebook this returns the normal interactive widget
+            # view. During a report export (save_notebook_html flips report
+            # mode on, in that kernel only) it instead returns a self-contained
+            # text/html snapshot — and drops the widget view so nbconvert bakes
+            # the static, kernel-free plot in unambiguously.
+            from . import _export
+
+            if _export._report_repr_enabled():
+                try:
+                    return {
+                        "text/html": _export.report_fragment(self),
+                        "text/plain": repr(self),
+                    }
+                except Exception:
+                    pass
+            return super()._repr_mimebundle_(**kwargs)
+
         def __repr__(self):
             # Shown as the text/plain fallback when a host can't render the
             # live widget view - e.g. a reopened notebook whose widget state

@@ -32,8 +32,10 @@ render = ["jupyter-scatter>=0.18"]
 anndata = ["anndata"]
 mudata = ["mudata"]
 spatial = ["spatialdata"]
+# Whole-notebook -> standalone HTML report (save_notebook_html).
+report = ["nbconvert>=7", "nbformat", "ipykernel"]
 all = ["jupyter-scatter>=0.18", "anndata", "mudata", "spatialdata"]
-dev = ["pytest", "anndata", "scipy", "anywidget>=0.9"]
+dev = ["pytest", "anndata", "scipy", "anywidget>=0.9", "nbconvert>=7", "ipykernel"]
 
 [project.urls]
 Homepage = "https://github.com/george123ya/reglscatterpy"

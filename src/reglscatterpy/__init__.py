@@ -13,10 +13,19 @@ million-point plot in one call::
     rs.scatterplot(adata, x="X_umap", color_by="CST3")  # a gene
 """
 
+from . import _export
 from ._compose import compose
-from ._export import save_html
+from ._export import save_html, save_notebook_html
 from ._extract import PlotData, extract
 from .scatterplot import scatterplot
 
-__all__ = ["scatterplot", "compose", "save_html", "extract", "PlotData", "__version__"]
+__all__ = [
+    "scatterplot",
+    "compose",
+    "save_html",
+    "save_notebook_html",
+    "extract",
+    "PlotData",
+    "__version__",
+]
 __version__ = "0.4.0"
