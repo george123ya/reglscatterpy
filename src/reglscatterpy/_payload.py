@@ -208,10 +208,12 @@ def _build_color_payload(
             [str(lv) for lv in levels], custom_colors, custom_palette, categorical_palette
         )
         z = cat.cat.codes.to_numpy().astype("int64")  # 0-based, matches as.integer(f)-1
+        counts = cat.value_counts().reindex(levels).fillna(0).astype("int64")
         options = {"colorBy": "valueA", "pointColor": hex_cols}
         legend = {
             "names": [str(lv) for lv in levels],
             "colors": hex_cols,
+            "counts": [int(c) for c in counts.to_numpy()],
             "var_type": "categorical",
             "title": legend_title,
             "var_name": color_var_name,
@@ -287,6 +289,8 @@ def build_payload(
     axis_color="#333333",
     legend_bg="#ffffff",
     legend_text="#000000",
+    legend_opacity=None,
+    legend_blur=None,
     legend_position="top-right",
     draggable_legend=True,
     enable_download=False,
@@ -369,6 +373,8 @@ def build_payload(
         "axisColor": axis_color,
         "legendBg": legend_bg,
         "legendText": legend_text,
+        "legendOpacity": legend_opacity,
+        "legendBlur": legend_blur,
         "legendAnchor": _resolve_legend_position(legend_position),
         "draggableLegend": bool(draggable_legend),
         "enableDownload": enable_download,

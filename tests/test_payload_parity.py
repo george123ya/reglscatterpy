@@ -41,6 +41,7 @@ def test_case_A_categorical():
     assert p["options"]["colorBy"] == e["colorBy"]
     assert p["legend"]["names"] == e["legend"]["names"]
     assert p["legend"]["colors"] == e["legend"]["colors"]
+    assert p["legend"]["counts"] == e["legend"]["counts"]
     assert p["legend"]["var_type"] == "categorical"
 
 
