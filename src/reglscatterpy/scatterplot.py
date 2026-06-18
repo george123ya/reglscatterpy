@@ -68,7 +68,7 @@ def scatterplot(
     filter_by: Any = None,
     point_labels: Optional[Sequence] = None,
     plot_id: Optional[str] = None,
-    width: Optional[int] = 700,
+    width: Optional[int] = None,
     height: int = 500,
     backend: str = "regl",
     show: bool = True,
