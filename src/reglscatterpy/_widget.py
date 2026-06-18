@@ -117,6 +117,54 @@ def _make_class():
                 out["fraction"] = counts / counts.sum()
             return out
 
+        def diff_expression(self, group_a=None, group_b=None, n=10, layer=None):
+            """Top differential genes between two cell groups.
+
+            ``group_a`` defaults to the current lasso selection; ``group_b``
+            defaults to all other cells ("rest"). Pass explicit index lists to
+            compare two saved selections (e.g. ``a = w.selection`` after one
+            lasso, then ``w.diff_expression(a, w.selection)`` after another).
+            Ranks genes by a Welch t-statistic (falls back to a standardised
+            mean difference if SciPy is absent) and returns the top ``n`` by
+            absolute effect, with ``logFC`` and group means. AnnData/MuData only.
+            """
+            import numpy as np
+            import pandas as pd
+
+            src = getattr(self, "_source", None)
+            if src is None or not hasattr(src, "X"):
+                raise TypeError("diff_expression() needs an AnnData/MuData with .X.")
+            n_obs = src.n_obs
+            a_idx = self.selection if group_a is None else [int(i) for i in group_a]
+            if not a_idx:
+                raise ValueError("Group A is empty - lasso some cells first.")
+            a_mask = np.zeros(n_obs, dtype=bool); a_mask[a_idx] = True
+            if group_b is None:
+                b_mask = ~a_mask
+            else:
+                b_mask = np.zeros(n_obs, dtype=bool); b_mask[[int(i) for i in group_b]] = True
+
+            X = src.layers[layer] if layer else src.X
+            Xa, Xb = X[a_mask], X[b_mask]
+            if hasattr(Xa, "toarray"):
+                Xa, Xb = Xa.toarray(), Xb.toarray()
+            Xa, Xb = np.asarray(Xa, dtype="float64"), np.asarray(Xb, dtype="float64")
+            ma, mb = Xa.mean(0), Xb.mean(0)
+            lfc = np.log2((ma + 1e-9) / (mb + 1e-9))
+            try:
+                from scipy import stats
+                stat, pval = stats.ttest_ind(Xa, Xb, axis=0, equal_var=False)
+            except Exception:  # pragma: no cover - scipy optional
+                denom = Xa.std(0) + Xb.std(0) + 1e-9
+                stat, pval = (ma - mb) / denom, np.full(ma.shape, np.nan)
+            res = pd.DataFrame({
+                "gene": np.asarray(src.var_names),
+                "logFC": lfc, "stat": stat, "pval": pval,
+                "mean_A": ma, "mean_B": mb,
+            })
+            res = res.reindex(res["stat"].abs().sort_values(ascending=False).index)
+            return res.head(n).reset_index(drop=True)
+
     return ReglScatter
 
 

@@ -69,6 +69,20 @@ w.annotate("cell_type", "T cells") # -> writes adata.obs["cell_type"] for those 
 rs.scatterplot(adata, x="X_umap", color_by="cell_type")
 ```
 
+## Differential expression of a selection
+
+Lasso a population and get its top markers vs the rest (or vs another lasso):
+
+```python
+w = rs.scatterplot(adata, x="X_umap", color_by="leiden")
+w                          # lasso a cluster
+w.diff_expression(n=10)    # top genes for the selection vs all other cells
+# or two saved selections:
+a = w.selection            # after lassoing group A
+# (lasso group B)
+w.diff_expression(a, w.selection)
+```
+
 ## Composition of a selection
 
 Lasso a region and see what it's made of:
