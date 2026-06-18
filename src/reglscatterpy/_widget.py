@@ -37,11 +37,22 @@ def _make_class():
         _height = traitlets.Int(500).tag(sync=True)
         # 0 => responsive (100% of the cell); a positive value => fixed px width.
         _width = traitlets.Int(0).tag(sync=True)
+        # Selected point indices, kept in sync both ways with the lasso.
+        _selection = traitlets.List(trait=traitlets.Int()).tag(sync=True)
 
         def update(self, spec: dict) -> "ReglScatter":
             """Swap in a new payload and re-render in place."""
             self._spec = spec
             return self
+
+        @property
+        def selection(self):
+            """Indices of the lasso-selected points (read or assign)."""
+            return list(self._selection)
+
+        @selection.setter
+        def selection(self, indices):
+            self._selection = [int(i) for i in (indices or [])]
 
     return ReglScatter
 

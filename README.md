@@ -41,6 +41,21 @@ rs.scatterplot(df, x="x", y="y", color_by="ct")
 Plots fill the notebook cell width by default; pass `width=` (pixels) for a
 fixed size.
 
+## Selection round-trip
+
+Lasso points in the plot, then read them back in another cell — or drive the
+selection from Python:
+
+```python
+w = rs.scatterplot(adata, x="X_umap", color_by="leiden")
+w                          # show it, lasso some cells in the widget
+
+w.selection                # -> [12, 87, 134, ...]  indices into adata
+adata_sub = adata[w.selection]   # subset and keep analysing
+
+w.selection = list(range(100))   # or set it from Python to highlight points
+```
+
 ## Supported objects
 
 | Input | `x` (embedding) | `color_by` / `group_by` |
