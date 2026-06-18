@@ -50,8 +50,9 @@ selection from Python:
 w = rs.scatterplot(adata, x="X_umap", color_by="leiden")
 w                          # show it, lasso some cells in the widget
 
-w.selection                # -> [12, 87, 134, ...]  indices into adata
-adata_sub = adata[w.selection]   # subset and keep analysing
+w.selection                # -> [12, 87, 134, ...]  positional indices
+adata[w.selection]         # subset the AnnData directly
+sub = w.subset()           # same thing, as a convenience
 
 w.selection = list(range(100))   # or set it from Python to highlight points
 ```

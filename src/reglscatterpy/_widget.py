@@ -54,6 +54,22 @@ def _make_class():
         def selection(self, indices):
             self._selection = [int(i) for i in (indices or [])]
 
+        def subset(self, selection=None):
+            """The source object subset to the selected cells.
+
+            Equivalent to ``adata[w.selection]`` (the indices are positional, in
+            the plotted order), returned as an ``AnnData`` / ``MuData`` view or a
+            DataFrame slice — so you can keep analysing the lassoed cells:
+            ``sub = w.subset(); sc.tl.rank_genes_groups(sub, ...)``.
+            """
+            sel = self.selection if selection is None else [int(i) for i in selection]
+            src = getattr(self, "_source", None)
+            if src is None:
+                raise ValueError("This plot has no source object to subset.")
+            if hasattr(src, "obs"):       # AnnData / MuData
+                return src[sel]
+            return src.iloc[sel]          # DataFrame
+
         def annotate(self, key, label, selection=None):
             """Write a label onto the lasso-selected cells.
 
