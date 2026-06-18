@@ -268,6 +268,8 @@ def build_payload(
     point_size=None,
     opacity=None,
     point_color=None,
+    size_values=None,
+    opacity_values=None,
     pixel_ratio=None,
     categorical_palette="Set1",
     continuous_palette="viridis",
@@ -341,6 +343,15 @@ def build_payload(
         else:
             z_payload = to_base64_f32(z)
 
+    # size/opacity encoding channel (valueB); both share one channel.
+    w_src = size_values if size_values is not None else opacity_values
+    w_payload = None
+    if w_src is not None:
+        wv = np.asarray(w_src, dtype="float64")
+        lo, hi = np.nanmin(wv), np.nanmax(wv)
+        w_unit = np.full_like(wv, 0.5) if hi == lo else (wv - lo) / (hi - lo)
+        w_payload = to_base64_u16_unit(w_unit)
+
     group_payload = None
     if data.group is not None:
         codes = pd.Series(data.group).astype("category").cat.codes.to_numpy().astype("int64")
@@ -357,6 +368,9 @@ def build_payload(
     return {
         "x": to_base64_u16(x_norm),
         "y": to_base64_u16(y_norm),
+        "w": w_payload,
+        "sizeBy": size_values is not None,
+        "opacityBy": opacity_values is not None,
         "z": z_payload,
         "filter_data": filter_payload,
         "group_data": group_payload,

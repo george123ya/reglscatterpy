@@ -74,6 +74,10 @@ compose([a, b])            # 2-up grid, linked camera + selection
 toolbar: pan, lasso, zoom-to-selection, reset, screenshot. Pass
 `zoom_on_selection=True` to auto-frame a lasso selection.
 
+Encode a numeric column on point **size** or **opacity** (in addition to
+colour): `scatterplot(adata, x="X_umap", color_by="leiden", size_by="n_genes")`
+or `opacity_by="total_counts"`.
+
 ## Supported objects
 
 | Input | `x` (embedding) | `color_by` / `group_by` |

@@ -25,6 +25,22 @@ from ._payload import build_payload
 __all__ = ["scatterplot"]
 
 
+def _resolve_numeric(spec, data):
+    """Resolve a size/opacity encoding to a numeric array: a column name (in a
+    DataFrame or AnnData ``.obs``) or a raw vector. Returns None if not set."""
+    if spec is None:
+        return None
+    if isinstance(spec, str):
+        if hasattr(data, "columns") and spec in getattr(data, "columns", []):
+            return pd.to_numeric(data[spec]).to_numpy()
+        obs = getattr(data, "obs", None)
+        if obs is not None and spec in getattr(obs, "columns", []):
+            return pd.to_numeric(obs[spec]).to_numpy()
+        raise KeyError(f"size_by/opacity_by column {spec!r} not found.")
+    import numpy as np
+    return np.asarray(spec, dtype="float64")
+
+
 def scatterplot(
     data: Any = None,
     *,
@@ -38,6 +54,8 @@ def scatterplot(
     point_size: Optional[float] = None,
     opacity: Optional[float] = None,
     point_color: Optional[str] = None,
+    size_by: Any = None,
+    opacity_by: Any = None,
     pixel_ratio: Optional[float] = None,
     categorical_palette: str = "Set1",
     continuous_palette: str = "viridis",
@@ -139,9 +157,13 @@ def scatterplot(
     if backend != "regl":
         raise ValueError("backend must be 'regl' or 'jscatter'.")
 
+    size_values = _resolve_numeric(size_by, data)
+    opacity_values = _resolve_numeric(opacity_by, data)
+
     spec = build_payload(
         pd_data,
         point_size=point_size, opacity=opacity, point_color=point_color,
+        size_values=size_values, opacity_values=opacity_values,
         pixel_ratio=pixel_ratio,
         categorical_palette=categorical_palette, continuous_palette=continuous_palette,
         custom_palette=custom_palette, custom_colors=custom_colors,
