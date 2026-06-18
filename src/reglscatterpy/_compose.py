@@ -42,6 +42,13 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync: bool = True):
     plots = list(plots)
     if not plots:
         raise ValueError("compose() needs at least one plot.")
+    if len(plots) > 16:
+        import warnings
+        warnings.warn(
+            f"compose() with {len(plots)} linked plots may be slow to render; "
+            "consider fewer or smaller plots.",
+            stacklevel=2,
+        )
 
     ids = [f"sp_compose_{i}" for i in range(len(plots))]
     group = ids if sync else None

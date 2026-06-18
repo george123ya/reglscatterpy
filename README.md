@@ -41,6 +41,11 @@ rs.scatterplot(df, x="x", y="y", color_by="ct")
 Plots fill the notebook cell width by default; pass `width=` (pixels) for a
 fixed size.
 
+> **Note:** like other Jupyter widgets, a plot's large state isn't reliably
+> saved into the `.ipynb`, so after **reopening** a notebook the cell may show
+> blank until you **re-run** it. (R's htmlwidgets embed in the saved HTML and
+> persist; that's an ecosystem difference.)
+
 ## Selection round-trip
 
 Lasso points in the plot, then read them back in another cell — or drive the
