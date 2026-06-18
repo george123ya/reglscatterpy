@@ -69,6 +69,16 @@ w.annotate("cell_type", "T cells") # -> writes adata.obs["cell_type"] for those 
 rs.scatterplot(adata, x="X_umap", color_by="cell_type")
 ```
 
+## Composition of a selection
+
+Lasso a region and see what it's made of:
+
+```python
+w = rs.scatterplot(adata, x="X_umap", color_by="leiden")
+w                                  # lasso a region
+w.composition("leiden")            # -> count + fraction per cluster in the selection
+```
+
 ## Linked grid
 
 Compare embeddings side by side — pan/zoom and lasso selection stay in sync:

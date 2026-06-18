@@ -93,6 +93,30 @@ def _make_class():
                 src[key] = new
             return src
 
+        def composition(self, by, selection=None, normalize=True):
+            """Composition of the lasso-selected cells by an ``obs`` column.
+
+            ``w.composition("leiden")`` returns a DataFrame of the count and
+            fraction of the selected cells in each category of ``by`` - e.g. to
+            see which clusters a lassoed region is made of. ``normalize=False``
+            drops the fraction column.
+            """
+            import pandas as pd
+
+            sel = self.selection if selection is None else [int(i) for i in selection]
+            if not sel:
+                raise ValueError("Nothing selected - lasso some points first.")
+            src = getattr(self, "_source", None)
+            if src is None:
+                raise ValueError("This plot has no source object.")
+            frame = src.obs if hasattr(src, "obs") else src
+            sub = frame.iloc[sel]
+            counts = sub[by].value_counts(dropna=False)
+            out = pd.DataFrame({"count": counts})
+            if normalize:
+                out["fraction"] = counts / counts.sum()
+            return out
+
     return ReglScatter
 
 
