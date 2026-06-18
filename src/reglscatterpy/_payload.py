@@ -237,7 +237,7 @@ def _build_color_payload(
         "midVal": (c_min + c_max) / 2.0,
         "var_type": "continuous",
         "colors": p_hex,
-        "title": legend_title if legend_title is not None else "Value",
+        "title": legend_title,
         "var_name": color_var_name,
     }
     return {"options": options, "legend": legend, "z": z}
