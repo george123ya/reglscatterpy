@@ -202,6 +202,11 @@ def _build_color_payload(
     )
 
     if is_categorical:
+        # Missing values become their own "NA" category so partially-annotated
+        # columns (e.g. after w.annotate on a subset) still colour every point.
+        s = s.astype("object")
+        if s.isna().any():
+            s = s.where(s.notna(), "NA")
         cat = s.astype("category")
         levels = list(cat.cat.categories)
         hex_cols = _resolve_categorical_palette(

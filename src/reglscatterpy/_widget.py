@@ -54,6 +54,45 @@ def _make_class():
         def selection(self, indices):
             self._selection = [int(i) for i in (indices or [])]
 
+        def annotate(self, key, label, selection=None):
+            """Write a label onto the lasso-selected cells.
+
+            Lasso a population in the plot, then ``w.annotate("cell_type",
+            "T cells")`` writes that label into ``obs[key]`` (AnnData / MuData)
+            or the column ``key`` (DataFrame) of the object this plot was made
+            from, for the currently selected rows. Call repeatedly with
+            different labels to build up an annotation; re-plot ``color_by=key``
+            to see it. Returns the annotated object.
+            """
+            import numpy as np
+            import pandas as pd
+
+            sel = self.selection if selection is None else [int(i) for i in selection]
+            src = getattr(self, "_source", None)
+            if src is None:
+                raise ValueError(
+                    "This plot has no source object to annotate "
+                    "(it was built from raw arrays)."
+                )
+            has_obs = hasattr(src, "obs")
+            frame = src.obs if has_obs else src
+            if not hasattr(frame, "columns"):
+                raise TypeError("annotate() supports AnnData, MuData and DataFrame.")
+            n = frame.shape[0]
+            if key in frame.columns:
+                col = np.asarray(frame[key].astype("object")).copy()
+            else:
+                col = np.array([None] * n, dtype=object)
+            for i in sel:
+                if 0 <= i < n:
+                    col[i] = label
+            new = pd.Categorical(col)
+            if has_obs:
+                src.obs[key] = new
+            else:
+                src[key] = new
+            return src
+
     return ReglScatter
 
 

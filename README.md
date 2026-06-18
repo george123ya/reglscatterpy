@@ -56,6 +56,19 @@ adata_sub = adata[w.selection]   # subset and keep analysing
 w.selection = list(range(100))   # or set it from Python to highlight points
 ```
 
+## Annotate cells by lassoing
+
+Lasso a population, label it, and the label is written straight back into
+`adata.obs` (or a DataFrame column) — curate cell types interactively:
+
+```python
+w = rs.scatterplot(adata, x="X_umap", color_by="leiden")
+w                                  # lasso a cluster
+w.annotate("cell_type", "T cells") # -> writes adata.obs["cell_type"] for those cells
+# lasso another, w.annotate("cell_type", "B cells"), ... then:
+rs.scatterplot(adata, x="X_umap", color_by="cell_type")
+```
+
 ## Linked grid
 
 Compare embeddings side by side — pan/zoom and lasso selection stay in sync:

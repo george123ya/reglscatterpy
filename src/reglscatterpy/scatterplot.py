@@ -186,6 +186,7 @@ def scatterplot(
     widget = ReglScatter()
     widget._height = int(height)
     widget._width = int(width) if width else 0   # 0 => responsive (100%)
+    widget._source = data   # so w.annotate(...) can write back to obs/colData
     widget._spec = spec
     return widget
 
