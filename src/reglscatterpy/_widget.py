@@ -45,6 +45,22 @@ def _make_class():
             self._spec = spec
             return self
 
+        def __repr__(self):
+            # Shown as the text/plain fallback when a host can't render the
+            # live widget view - e.g. a reopened notebook whose widget state
+            # wasn't saved. A clean summary beats the default object address;
+            # the hint tells the user how to get the plot back.
+            spec = self._spec or {}
+            n = spec.get("n_points")
+            by = spec.get("colorVar") or spec.get("groupVar")
+            bits = ["reglscatterpy plot"]
+            if n is not None:
+                bits.append(f"{n:,} points")
+            if by:
+                bits.append(f"color_by={by!r}")
+            head = ", ".join(bits)
+            return f"<{head}> (re-run this cell to render the interactive plot)"
+
         @property
         def selection(self):
             """Indices of the lasso-selected points (read or assign)."""
