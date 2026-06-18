@@ -58,12 +58,10 @@ Plots default to a fixed **700 px** width (like matplotlib / plotly); pass
 `categorical_palette`, `custom_colors`, `vmin` / `vmax`, `center_zero`,
 `filter_by`, legend styling, `enable_download`, and more.
 
-### Backends
-
-By default `scatterplot()` renders reglscatterpy's own widget (the shared one).
-`backend="jscatter"` is an optional, lighter alternative that renders through
-[jupyter-scatter](https://github.com/flekschas/jupyter-scatter) instead, without
-this package's legend / filter / export UI (`pip install reglscatterpy[render]`).
+> A `backend="jscatter"` option also exists if you'd rather render with
+> [jupyter-scatter](https://github.com/flekschas/jupyter-scatter)
+> (`pip install reglscatterpy[render]`); the default native widget is
+> recommended.
 
 ## The widget bundle
 
