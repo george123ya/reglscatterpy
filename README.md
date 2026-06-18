@@ -56,6 +56,24 @@ adata_sub = adata[w.selection]   # subset and keep analysing
 w.selection = list(range(100))   # or set it from Python to highlight points
 ```
 
+## Linked grid
+
+Compare embeddings side by side — pan/zoom and lasso selection stay in sync:
+
+```python
+from reglscatterpy import scatterplot, compose
+
+a = scatterplot(adata, x="X_umap", color_by="leiden")
+b = scatterplot(adata, x="X_pca",  color_by="leiden")
+compose([a, b])            # 2-up grid, linked camera + selection
+```
+
+## Toolbar & selection extras
+
+`scatterplot(..., toolbar="left")` (or `"top"`, `"none"`) shows an in-plot
+toolbar: pan, lasso, zoom-to-selection, reset, screenshot. Pass
+`zoom_on_selection=True` to auto-frame a lasso selection.
+
 ## Supported objects
 
 | Input | `x` (embedding) | `color_by` / `group_by` |
