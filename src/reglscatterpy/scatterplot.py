@@ -41,6 +41,31 @@ def _resolve_numeric(spec, data):
     return np.asarray(spec, dtype="float64")
 
 
+def _resolve_cols(spec, data):
+    """Resolve tooltip fields to a dict {name: array}: column name(s) (DataFrame
+    or AnnData obs / var feature), a dict, or a DataFrame. None if not set."""
+    if spec is None:
+        return None
+    import numpy as np
+    if isinstance(spec, dict):
+        return spec
+    if hasattr(spec, "columns") and hasattr(spec, "iloc"):  # DataFrame
+        return {c: spec[c].to_numpy() for c in spec.columns}
+    names = [spec] if isinstance(spec, str) else list(spec)
+    out = {}
+    for nm in names:
+        if hasattr(data, "columns") and nm in getattr(data, "columns", []):
+            out[nm] = data[nm].to_numpy()
+        elif hasattr(data, "obs") and nm in getattr(data.obs, "columns", []):
+            out[nm] = data.obs[nm].to_numpy()
+        elif hasattr(data, "var_names") and nm in list(getattr(data, "var_names", [])):
+            col = data[:, nm].X
+            out[nm] = col.toarray().ravel() if hasattr(col, "toarray") else np.asarray(col).ravel()
+        else:
+            raise KeyError(f"tooltip_by field {nm!r} not found.")
+    return out
+
+
 def scatterplot(
     data: Any = None,
     *,
@@ -56,6 +81,7 @@ def scatterplot(
     point_color: Optional[str] = None,
     size_by: Any = None,
     opacity_by: Any = None,
+    tooltip_by: Any = None,
     pixel_ratio: Optional[float] = None,
     categorical_palette: str = "Set1",
     continuous_palette: str = "viridis",
@@ -159,11 +185,13 @@ def scatterplot(
 
     size_values = _resolve_numeric(size_by, data)
     opacity_values = _resolve_numeric(opacity_by, data)
+    tooltip_cols = _resolve_cols(tooltip_by, data)
 
     spec = build_payload(
         pd_data,
         point_size=point_size, opacity=opacity, point_color=point_color,
         size_values=size_values, opacity_values=opacity_values,
+        tooltip_cols=tooltip_cols,
         pixel_ratio=pixel_ratio,
         categorical_palette=categorical_palette, continuous_palette=continuous_palette,
         custom_palette=custom_palette, custom_colors=custom_colors,

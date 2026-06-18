@@ -84,6 +84,15 @@ a = w.selection            # after lassoing group A
 w.diff_expression(a, w.selection)
 ```
 
+## Richer tooltips
+
+Show extra fields on hover:
+
+```python
+rs.scatterplot(adata, x="X_umap", color_by="leiden",
+               tooltip_by=["n_genes", "sample", "CST3"])   # obs cols or genes
+```
+
 ## Composition of a selection
 
 Lasso a region and see what it's made of:
