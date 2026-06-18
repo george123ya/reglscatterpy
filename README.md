@@ -43,8 +43,24 @@ fixed size.
 
 > **Note:** like other Jupyter widgets, a plot's large state isn't reliably
 > saved into the `.ipynb`, so after **reopening** a notebook the cell may show
-> blank until you **re-run** it. (R's htmlwidgets embed in the saved HTML and
-> persist; that's an ecosystem difference.)
+> blank (or `Could not render … widget-view`) until you **re-run** it. To keep
+> an interactive copy that survives reopening — and to share a plot with someone
+> who has no kernel — export it to a standalone HTML file (see below).
+
+## Save a standalone HTML (offline, kernel-free)
+
+The Python equivalent of R's `htmlwidgets::saveWidget`: write a single
+self-contained `.html` that **inlines the widget and the plot's data**, so it
+opens in any browser with no kernel and no internet:
+
+```python
+w = rs.scatterplot(adata, x="X_umap", color_by="leiden")
+rs.save_html(w, "umap.html")      # or:  w.to_html("umap.html")
+```
+
+The saved file is fully interactive (pan/zoom, legend, lasso, tooltips,
+PNG/SVG/PDF export) but it's a **snapshot** — it has no kernel, so the Python
+round-trips (`w.selection`, `w.annotate`, …) only work in the live notebook.
 
 ## Selection round-trip
 

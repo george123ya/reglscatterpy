@@ -45,6 +45,18 @@ def _make_class():
             self._spec = spec
             return self
 
+        def to_html(self, path, title="reglscatterpy plot"):
+            """Save this plot as a standalone, offline HTML file.
+
+            Like R's ``htmlwidgets::saveWidget`` - the file inlines the widget
+            and the plot's data, so it stays interactive after a notebook is
+            closed and reopened (a kernel-free snapshot; no Python
+            round-trip). ``w.to_html("umap.html")``.
+            """
+            from ._export import save_html
+
+            return save_html(self, path, title=title)
+
         def __repr__(self):
             # Shown as the text/plain fallback when a host can't render the
             # live widget view - e.g. a reopened notebook whose widget state
