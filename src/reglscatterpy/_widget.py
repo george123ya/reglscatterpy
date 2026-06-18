@@ -65,14 +65,19 @@ def _make_class():
             # the static, kernel-free plot in unambiguously.
             from . import _export
 
-            if _export._report_repr_enabled():
-                try:
+            try:
+                if _export._report_repr_enabled():
                     return {
                         "text/html": _export.report_fragment(self),
                         "text/plain": repr(self),
                     }
-                except Exception:
-                    pass
+                if _export._record_enabled():
+                    return {
+                        "text/html": _export.record_fragment(self),
+                        "text/plain": repr(self),
+                    }
+            except Exception:
+                pass
             return super()._repr_mimebundle_(**kwargs)
 
         def __repr__(self):

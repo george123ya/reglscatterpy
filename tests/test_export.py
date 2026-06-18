@@ -68,29 +68,75 @@ def test_save_html_rejects_empty(tmp_path):
         rs.save_html(Dummy(), tmp_path / "x.html")
 
 
-def test_save_notebook_html(tmp_path):
-    pytest.importorskip("nbconvert")
-    pytest.importorskip("nbformat")
-    pytest.importorskip("ipykernel")
+def test_record_mode_emits_self_contained_html():
+    rs.record_html()
+    try:
+        w = _widget()
+        bundle = w._repr_mimebundle_()
+        assert "text/html" in bundle
+        assert "application/vnd.jupyter.widget-view+json" not in bundle
+        frag = bundle["text/html"]
+        # Self-contained: carries the bundle so a reopened notebook works.
+        assert "DecompressionStream('gzip')" in frag
+        assert "window.__rsBundleURL" in frag
+    finally:
+        rs.record_html(False)
+    # Off again -> normal interactive widget view (ipywidgets returns a
+    # (data, metadata) tuple here; record mode returns a plain dict).
+    off = _widget()._repr_mimebundle_()
+    data = off[0] if isinstance(off, tuple) else off
+    assert "application/vnd.jupyter.widget-view+json" in data
+
+
+def _make_nb(tmp_path, record):
     import nbformat as nbf
 
+    setup = "import numpy as np, pandas as pd, reglscatterpy as rs\n"
+    if record:
+        setup += "rs.record_html()\n"
     nb = nbf.v4.new_notebook()
     nb.cells = [
         nbf.v4.new_markdown_cell("# Report"),
+        nbf.v4.new_code_cell(setup),
         nbf.v4.new_code_cell(
-            "import numpy as np, pandas as pd, reglscatterpy as rs\n"
             "df = pd.DataFrame({'x': np.arange(30), 'y': np.arange(30),\n"
             "                   'ct': ['a','b','c']*10})\n"
             "rs.scatterplot(df, x='x', y='y', color_by='ct')"
         ),
     ]
-    nb_path = tmp_path / "r.ipynb"
+    p = tmp_path / "r.ipynb"
+    nbf.write(nb, str(p))
+    return p
+
+
+def test_save_notebook_html_execute(tmp_path):
+    pytest.importorskip("nbconvert")
+    pytest.importorskip("ipykernel")
+    nb_path = _make_nb(tmp_path, record=False)
+    out = rs.save_notebook_html(nb_path, tmp_path / "r.html", execute=True)
+    html = pathlib.Path(out).read_text(encoding="utf-8")
+    # Bundle embedded exactly once; the plot is baked in as a static fragment.
+    assert html.count(rs._export._bundle_gz_b64()[:60]) == 1
+    assert "window.__rsBundleURL).then" in html
+    assert 'id="rs_' in html
+
+
+def test_save_notebook_html_no_execute_uses_recorded_outputs(tmp_path):
+    pytest.importorskip("nbconvert")
+    pytest.importorskip("ipykernel")
+    from nbconvert.preprocessors import ExecutePreprocessor
+    import nbformat as nbf
+
+    # Run the recorded notebook ONCE (as a user would), then export with NO
+    # re-execution and confirm the plot is still baked in (de-duped to one bundle).
+    nb_path = _make_nb(tmp_path, record=True)
+    nb = nbf.read(str(nb_path), as_version=4)
+    ExecutePreprocessor(timeout=120, kernel_name="python3").preprocess(
+        nb, {"metadata": {"path": str(tmp_path)}}
+    )
     nbf.write(nb, str(nb_path))
 
-    out = rs.save_notebook_html(nb_path, tmp_path / "r.html")
+    out = rs.save_notebook_html(nb_path, tmp_path / "r.html")  # execute=False
     html = pathlib.Path(out).read_text(encoding="utf-8")
-    # The shared bundle is embedded exactly once, and the plot is baked in as a
-    # static fragment that imports it (not a live widget view).
-    assert html.count('window.__rsBundleURL = window.__rsLoad(') == 1
-    assert "window.__rsBundleURL).then" in html
-    assert 'id="rs_' in html  # the inlined plot div fragment
+    assert html.count(rs._export._bundle_gz_b64()[:60]) == 1
+    assert 'id="rs_' in html

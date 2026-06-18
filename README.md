@@ -64,20 +64,43 @@ round-trips (`w.selection`, `w.annotate`, …) only work in the live notebook. T
 widget bundle is inlined gzip-compressed (~0.5 MB, decompressed in-browser), so
 a one-plot file is well under 1 MB. No R is involved — it's pure Python.
 
-### A whole notebook → one HTML report
+### A whole notebook → one HTML report (no re-running)
 
 Plain `jupyter nbconvert --to html` leaves the plots blank (the same widget-state
-limitation). `save_notebook_html` re-executes the notebook and bakes every plot
-in as an interactive, kernel-free figure, sharing **one** copy of the bundle
-across all plots:
+limitation). The fix that **avoids re-executing a heavy notebook** is *record
+mode*: call `rs.record_html()` once at the top, then run your notebook normally —
+each plot bakes a static, interactive copy into its own cell output. After that:
 
 ```python
-rs.save_notebook_html("analysis.ipynb", "analysis_report.html")
+import reglscatterpy as rs
+rs.record_html()                 # run once near the top, then work as usual
+# ... rs.scatterplot(...) cells ...
 ```
 
-Needs `nbconvert` + `ipykernel` (`pip install reglscatterpy[report]`). The plots
-are fully offline; note that nbconvert's own page chrome (MathJax/RequireJS) is
-still referenced from a CDN — use [`nb_offline_convert`](https://github.com/trungleduc/nb_offline_convert)
+```bash
+# reopening the notebook now shows the plots, and either of these makes a report
+# WITHOUT re-running anything:
+jupyter nbconvert --to html analysis.ipynb
+reglscatterpy-report analysis.ipynb -o analysis_report.html
+```
+
+`reglscatterpy-report` (and `rs.save_notebook_html(...)`) default to **not**
+re-executing — they use the recorded outputs and share **one** copy of the
+bundle across all plots. For a notebook that *wasn't* recorded, pass `--execute`
+(CLI) / `execute=True` to re-run it once.
+
+```python
+rs.save_notebook_html("analysis.ipynb", "report.html")             # uses outputs
+rs.save_notebook_html("analysis.ipynb", "report.html", execute=True)  # re-runs
+```
+
+> Recorded plots are a **one-way snapshot**: pan/zoom/lasso/tooltips/export all
+> work, but `w.selection` / `w.annotate` no longer round-trip to Python (there's
+> no kernel). Call `rs.record_html(False)` to go back to the live widget.
+
+Needs `nbconvert` + `ipykernel` (`pip install 'reglscatterpy[report]'`). The
+plots are fully offline; nbconvert's own page chrome (MathJax/RequireJS) is still
+CDN-referenced — use [`nb_offline_convert`](https://github.com/trungleduc/nb_offline_convert)
 if you need the surrounding report shell to be 100% offline too.
 
 ## Selection round-trip

@@ -15,7 +15,7 @@ million-point plot in one call::
 
 from . import _export
 from ._compose import compose
-from ._export import save_html, save_notebook_html
+from ._export import record_html, save_html, save_notebook_html
 from ._extract import PlotData, extract
 from .scatterplot import scatterplot
 
@@ -24,6 +24,7 @@ __all__ = [
     "compose",
     "save_html",
     "save_notebook_html",
+    "record_html",
     "extract",
     "PlotData",
     "__version__",
