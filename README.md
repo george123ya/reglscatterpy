@@ -1,9 +1,18 @@
 # reglscatterpy
 
+[![PyPI](https://img.shields.io/pypi/v/reglscatterpy.svg)](https://pypi.org/project/reglscatterpy/)
+[![Python versions](https://img.shields.io/pypi/pyversions/reglscatterpy.svg)](https://pypi.org/project/reglscatterpy/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Interactive WebGL scatterplots for single-cell / spatial data in Python —
 **AnnData, MuData, SpatialData**, pandas, numpy. Renders millions of points in
 the browser via [`regl-scatterplot`](https://github.com/flekschas/regl-scatterplot),
 in **Jupyter, JupyterLab, VS Code and Colab**.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/demo.gif"
+       alt="Panning, lassoing and legend-filtering an interactive UMAP" width="760">
+</p>
 
 This is the Python companion to the R package
 [**reglScatterplotR**](https://github.com/george123ya/reglScatterplotR). Both
@@ -40,6 +49,14 @@ rs.scatterplot(df, x="x", y="y", color_by="ct")
 
 Plots fill the notebook cell width by default; pass `width=` (pixels) for a
 fixed size.
+
+## Gallery
+
+| Categorical colouring | Continuous (gene) colouring |
+|---|---|
+| ![Categorical UMAP with frosted legend](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/umap-categorical.png) | ![Gene-expression UMAP with colour bar](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/umap-continuous.png) |
+| **`filter_by` distribution sliders** | **Linked grid (`compose`)** |
+| ![Range-filter sliders with histograms](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/filter-sliders.png) | ![Two embeddings with synced camera and selection](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/linked-grid.png) |
 
 > **Note:** like other Jupyter widgets, a plot's large state isn't reliably
 > saved into the `.ipynb`, so after **reopening** a notebook the cell may show
