@@ -36,9 +36,14 @@ import scanpy as sc
 import reglscatterpy as rs
 
 adata = sc.datasets.pbmc3k_processed()
-rs.scatterplot(adata, x="X_umap", color_by="louvain")   # an obs column
-rs.scatterplot(adata, x="X_umap", color_by="CST3")      # a gene
+rs.scatterplot(adata, basis="umap", color_by="louvain")   # an obs column
+rs.scatterplot(adata, basis="umap", color_by="CST3")      # a gene
 ```
+
+`basis=` selects the embedding for single-cell objects — short names like
+`"umap"`/`"pca"` resolve to the `obsm` key (`X_umap`, …), case-insensitively.
+`x="X_umap"` still works as an alias. For a **DataFrame** you instead give the
+coordinate columns with `x=`/`y=`:
 
 ```python
 import numpy as np, pandas as pd
@@ -184,13 +189,24 @@ w.composition("leiden")            # -> count + fraction per cluster in the sele
 
 ## Linked grid
 
-Compare embeddings side by side — pan/zoom and lasso selection stay in sync:
+Colour one embedding by **several genes / obs columns at once** — pass a list to
+`color_by` and you get a linked grid, one panel per value (camera + lasso stay in
+sync across panels):
+
+```python
+rs.scatterplot(adata, basis="umap", color_by=["louvain", "CST3", "NKG7"])
+```
+
+> A *list of names* means "one panel per name". A raw per-point colour vector must
+> be a numpy array / pandas Series (not a list of strings).
+
+Or compose pre-built plots — e.g. compare different embeddings side by side:
 
 ```python
 from reglscatterpy import scatterplot, compose
 
-a = scatterplot(adata, x="X_umap", color_by="leiden")
-b = scatterplot(adata, x="X_pca",  color_by="leiden")
+a = scatterplot(adata, basis="umap", color_by="leiden")
+b = scatterplot(adata, basis="pca",  color_by="leiden")
 compose([a, b])            # 2-up grid, linked camera + selection
 ```
 
@@ -200,9 +216,10 @@ compose([a, b])            # 2-up grid, linked camera + selection
 toolbar: pan, lasso, zoom-to-selection, reset, screenshot. Pass
 `zoom_on_selection=True` to auto-frame a lasso selection.
 
-Encode a numeric column on point **size** or **opacity** (in addition to
-colour): `scatterplot(adata, x="X_umap", color_by="leiden", size_by="n_genes")`
-or `opacity_by="total_counts"`.
+Encode a numeric column **or a gene** on point **size** or **opacity** (in
+addition to colour):
+`scatterplot(adata, basis="umap", color_by="leiden", size_by="n_genes")`,
+`size_by="CST3"`, or `opacity_by="total_counts"`.
 
 ## Supported objects
 

@@ -19,6 +19,7 @@ The single-cell resolution rules mirror the R package (``reglScatterplotR``):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from difflib import get_close_matches
 from typing import Any, Optional, Sequence, Union
 
 import numpy as np
@@ -26,6 +27,27 @@ import numpy as np
 __all__ = ["PlotData", "extract"]
 
 ColorSpec = Union[str, Sequence[Any], np.ndarray, None]
+
+
+def _not_found(param: str, value: Any, available, *, searched: str = "") -> KeyError:
+    """Build a uniform, actionable 'name not found' error.
+
+    States the parameter, the bad value, what was searched, a 'did you mean'
+    suggestion, and a (truncated) list of valid names.
+    """
+    avail = [str(a) for a in available]
+    msg = f"{param}={value!r} not found"
+    if searched:
+        msg += f" (searched {searched})"
+    msg += "."
+    hit = get_close_matches(str(value), avail, n=1)
+    if hit:
+        msg += f" Did you mean {hit[0]!r}?"
+    if avail:
+        shown = avail[:15]
+        more = "" if len(avail) <= 15 else f", … (+{len(avail) - 15} more)"
+        msg += f" Available: {shown}{more}"
+    return KeyError(msg)
 
 
 @dataclass
@@ -89,9 +111,7 @@ def _resolve_basis(adata: Any, x: Optional[str]) -> str:
             return c
         if c.lower() in lower:
             return lower[c.lower()]
-    raise KeyError(
-        f"Embedding {x!r} not found in .obsm; available: {keys}"
-    )
+    raise _not_found("basis/x", x, keys, searched=".obsm (also tried 'X_' prefix)")
 
 
 def _resolve_anndata_vec(adata: Any, key: ColorSpec, layer: Optional[str]):
@@ -114,8 +134,10 @@ def _resolve_anndata_vec(adata: Any, key: ColorSpec, layer: Optional[str]):
             mat = adata[:, key].X
         return _densify(mat), key
 
-    raise KeyError(
-        f"{key!r} is neither an .obs column nor a feature in .var_names."
+    raise _not_found(
+        "color_by/group_by", key,
+        list(adata.obs.columns) + list(var_names),
+        searched=".obs columns and .var_names",
     )
 
 
@@ -180,8 +202,9 @@ def _from_mudata(mdata, x, y, color_by, group_by, layer, dims) -> PlotData:
             return mdata.obs[spec].to_numpy(), spec
         if not isinstance(spec, str):
             return np.asarray(spec), None
-        raise KeyError(
-            f"{spec!r} not found in MuData .obs or as 'modality:feature'."
+        raise _not_found(
+            "color_by/group_by", spec, list(mdata.obs.columns),
+            searched=".obs (for a feature use 'modality:feature', e.g. 'rna:CD3D')",
         )
 
     color, color_name = resolve_global(color_by)
@@ -202,7 +225,7 @@ def _from_spatialdata(
         raise ValueError("SpatialData object has no annotation tables.")
     tbl = table or tables[0]
     if tbl not in sdata.tables:
-        raise KeyError(f"Table {tbl!r} not found; available: {tables}")
+        raise _not_found("table", tbl, tables, searched=".tables")
     adata = sdata.tables[tbl]
     # x defaults to the spatial coordinates for a SpatialData input.
     return _from_anndata(adata, x or "spatial", y, color_by, group_by,
@@ -212,16 +235,22 @@ def _from_spatialdata(
 def _from_dataframe(df, x, y, color_by, group_by) -> PlotData:
     if x is None or y is None:
         raise ValueError("For a DataFrame, pass x= and y= column names.")
+    cols = list(df.columns)
+    for param, name in (("x", x), ("y", y)):
+        if name not in df.columns:
+            raise _not_found(param, name, cols, searched="DataFrame columns")
 
-    def col(spec):
+    def col(param, spec):
         if spec is None:
             return None, None
         if isinstance(spec, str):
+            if spec not in df.columns:
+                raise _not_found(param, spec, cols, searched="DataFrame columns")
             return df[spec].to_numpy(), spec
         return np.asarray(spec), None
 
-    color, color_name = col(color_by)
-    group, group_name = col(group_by)
+    color, color_name = col("color_by", color_by)
+    group, group_name = col("group_by", group_by)
     return PlotData(
         df[x].to_numpy(), df[y].to_numpy(), color, group,
         color_name, group_name, str(x), str(y),
@@ -254,18 +283,29 @@ def extract(
 ) -> PlotData:
     """Normalise any supported input into :class:`PlotData`."""
     if _is_anndata(data):
-        return _from_anndata(data, x, y, color_by, group_by, layer, dims)
-    if _is_mudata(data):
-        return _from_mudata(data, x, y, color_by, group_by, layer, dims)
-    if _is_spatialdata(data):
-        return _from_spatialdata(
+        result = _from_anndata(data, x, y, color_by, group_by, layer, dims)
+    elif _is_mudata(data):
+        result = _from_mudata(data, x, y, color_by, group_by, layer, dims)
+    elif _is_spatialdata(data):
+        result = _from_spatialdata(
             data, x, y, color_by, group_by, layer, dims, table
         )
-    if type(data).__name__ == "DataFrame":
-        return _from_dataframe(data, x, y, color_by, group_by)
-    if isinstance(data, np.ndarray) or hasattr(data, "__array__"):
-        return _from_array(data, x, y, color_by, group_by)
-    raise TypeError(
-        f"Unsupported input type {type(data).__name__!r}. Pass an AnnData, "
-        "MuData, SpatialData, pandas DataFrame, or numpy array."
-    )
+    elif type(data).__name__ == "DataFrame":
+        result = _from_dataframe(data, x, y, color_by, group_by)
+    elif isinstance(data, np.ndarray) or hasattr(data, "__array__"):
+        result = _from_array(data, x, y, color_by, group_by)
+    else:
+        raise TypeError(
+            f"Unsupported input type {type(data).__name__!r}. Pass an AnnData, "
+            "MuData, SpatialData, pandas DataFrame, or numpy array."
+        )
+
+    # Catch a raw color/group vector whose length doesn't match the points
+    # (otherwise it silently mis-renders).
+    n = result.n
+    for param, vec in (("color_by", result.color), ("group_by", result.group)):
+        if vec is not None and len(vec) != n:
+            raise ValueError(
+                f"{param} has length {len(vec)} but the data has {n} points."
+            )
+    return result
