@@ -103,6 +103,27 @@ def test_size_by_obs_column_still_works(adata):
     assert w._spec["sizeBy"] is True
 
 
+# --- z-order / draw depth -------------------------------------------------- #
+def test_sort_order_reorders_and_selection_roundtrips(adata):
+    w = rs.scatterplot(adata, basis="umap", color="Gene0", interactive=True,
+                       sort_order=True, show=False)
+    assert w._draw_order is not None             # continuous + sort_order -> reordered
+    w.selection = [3, 7, 11]                       # set in DATA indices
+    assert w.selection == [3, 7, 11]               # reads back as DATA indices
+    assert list(w._selection) != [3, 7, 11]        # stored internally as draw positions
+
+
+def test_random_state_is_reproducible(adata):
+    a = rs.scatterplot(adata, basis="umap", color="celltype", random_state=0, show=False)
+    b = rs.scatterplot(adata, basis="umap", color="celltype", random_state=0, show=False)
+    assert np.array_equal(a._draw_order, b._draw_order)
+
+
+def test_sort_order_off_keeps_natural_order(adata):
+    w = rs.scatterplot(adata, basis="umap", color="Gene0", sort_order=False, show=False)
+    assert w._draw_order is None                   # no reorder -> identity
+
+
 # --- na_color + groups ----------------------------------------------------- #
 def test_groups_greys_unlisted_categories(adata):
     w = rs.scatterplot(adata, basis="umap", color="celltype",

@@ -76,6 +76,20 @@ def _maybe_save(obj, save):
         )
 
 
+def _compute_draw_order(color, n, sort_order, random_state):
+    """Permutation of point indices controlling draw depth (drawn later = on
+    top), or None for the natural order. ``sort_order`` draws higher *continuous*
+    values on top (scanpy's default); ``random_state`` shuffles with a seed so
+    no category is systematically hidden by overplotting (reproducibly)."""
+    if random_state is not None:
+        return np.random.RandomState(int(random_state)).permutation(n)
+    if sort_order and color is not None:
+        arr = np.asarray(color)
+        if np.issubdtype(arr.dtype, np.number):
+            return np.argsort(arr, kind="stable")   # ascending -> high on top
+    return None
+
+
 def _resolve_numeric(spec, data, layer=None, param="size_by", use_raw=None):
     """Resolve a size/opacity encoding to a numeric array: a column name (in a
     DataFrame or AnnData ``.obs``), a ``var_names`` feature, or a raw vector.
@@ -154,6 +168,8 @@ def scatterplot(
     save: Optional[str] = None,     # write to a file (.html now; see docs)
     na_color: str = "lightgray",    # colour for NaN / un-selected categories
     groups: Any = None,             # show only these categories; grey the rest
+    sort_order: bool = True,        # draw higher continuous values on top (scanpy)
+    random_state: Optional[int] = None,  # seed -> random draw order (reduce overplotting)
     # --- original names (still supported as aliases) ------------------------
     basis: Optional[Union[str, int]] = None,
     x: Optional[Union[str, int]] = None,
@@ -311,7 +327,9 @@ def scatterplot(
                 pixel_ratio=pixel_ratio, categorical_palette=categorical_palette,
                 continuous_palette=continuous_palette, custom_palette=custom_palette,
                 custom_colors=custom_colors, vmin=vmin, vmax=vmax,
-                center_zero=center_zero, title=(title or name), xlab=xlab, ylab=ylab,
+                center_zero=center_zero, na_color=na_color, groups=groups,
+                sort_order=sort_order, random_state=random_state,
+                title=(title or name), xlab=xlab, ylab=ylab,
                 legend_title=legend_title, show_axes=show_axes,
                 show_tooltip=show_tooltip, background_color=background_color,
                 axis_color=axis_color, legend_bg=legend_bg, legend_text=legend_text,
@@ -379,6 +397,30 @@ def scatterplot(
                 f"{pname} has length {len(vec)} but the data has {n} points."
             )
 
+    # Draw order (z-depth). Reorder ALL per-point arrays consistently; the
+    # permutation is stored on the widget and w.selection is translated back to
+    # data indices at the Python boundary, so the JS never needs to know.
+    draw_order = _compute_draw_order(pd_data.color, n, sort_order, random_state)
+    if draw_order is not None:
+        import dataclasses
+
+        pd_data = dataclasses.replace(
+            pd_data,
+            x=np.asarray(pd_data.x)[draw_order], y=np.asarray(pd_data.y)[draw_order],
+            color=(np.asarray(pd_data.color)[draw_order] if pd_data.color is not None else None),
+            group=(np.asarray(pd_data.group)[draw_order] if pd_data.group is not None else None),
+        )
+        if size_values is not None:
+            size_values = np.asarray(size_values)[draw_order]
+        if opacity_values is not None:
+            opacity_values = np.asarray(opacity_values)[draw_order]
+        if tooltip_cols:
+            tooltip_cols = {k: np.asarray(v)[draw_order] for k, v in tooltip_cols.items()}
+        if filter_by is not None:
+            filter_by = pd.DataFrame(filter_by).iloc[draw_order].reset_index(drop=True)
+        if point_labels is not None:
+            point_labels = [point_labels[int(i)] for i in draw_order]
+
     spec = build_payload(
         pd_data,
         point_size=point_size, opacity=opacity, point_color=point_color,
@@ -411,6 +453,7 @@ def scatterplot(
         widget._height = int(height)
         widget._width = w
         widget._source = data   # so w.annotate(...) can write back to obs/colData
+        widget._draw_order = draw_order   # selection translates through this
         widget._spec = spec
         _maybe_save(widget, save)
         return widget
@@ -421,6 +464,7 @@ def scatterplot(
     from ._widget import StaticPlot
 
     plot = StaticPlot(spec=spec, source=data, height=int(height), width=w)
+    plot._draw_order = draw_order
     _maybe_save(plot, save)
     return plot
 

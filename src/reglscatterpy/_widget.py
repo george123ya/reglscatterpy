@@ -56,16 +56,32 @@ def _make_classes():
 
         @property
         def selection(self):
-            """Indices of the lasso-selected points (read or assign).
+            """Indices of the lasso-selected points (read or assign), always in
+            **data order** — translated through the draw-order permutation when
+            the plot was z-ordered (sort_order / random_state).
 
             Live (``interactive=True``) only — on a static plot this stays empty
             because there is no kernel link.
             """
-            return list(self._selection)
+            sel = list(self._selection)
+            perm = getattr(self, "_draw_order", None)
+            if perm is not None:
+                return [int(perm[p]) for p in sel if 0 <= p < len(perm)]
+            return [int(p) for p in sel]
 
         @selection.setter
         def selection(self, indices):
-            self._selection = [int(i) for i in (indices or [])]
+            idx = [int(i) for i in (indices or [])]
+            perm = getattr(self, "_draw_order", None)
+            if perm is not None:
+                inv = getattr(self, "_inv_draw_order", None)
+                if inv is None:
+                    import numpy as np
+                    inv = np.empty(len(perm), dtype="int64")
+                    inv[np.asarray(perm)] = np.arange(len(perm))
+                    self._inv_draw_order = inv
+                idx = [int(inv[d]) for d in idx if 0 <= d < len(inv)]
+            self._selection = idx
 
         def subset(self, selection=None):
             """The source object subset to the selected cells (``adata[w.selection]``)."""
