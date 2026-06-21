@@ -126,12 +126,17 @@ def _resolve_anndata_vec(adata: Any, key: ColorSpec, layer: Optional[str]):
 
     var_names = adata.raw.var_names if (layer == "raw" and adata.raw) else adata.var_names
     if key in var_names:
+        sub = adata[:, key]
         if layer == "raw" and adata.raw is not None:
             mat = adata.raw[:, key].X
         elif layer is not None:
-            mat = adata[:, key].layers[layer]
+            mat = sub.layers[layer]
+        elif sub.X is not None:          # default: the main matrix
+            mat = sub.X
+        elif len(adata.layers) > 0:       # X is absent -> fall back to a layer
+            mat = sub.layers[next(iter(adata.layers))]
         else:
-            mat = adata[:, key].X
+            mat = sub.X                   # truly nothing -> let it error clearly
         return _densify(mat), key
 
     raise _not_found(

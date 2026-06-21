@@ -38,6 +38,14 @@ __all__ = ["scatterplot"]
 _TOOLBAR_CHOICES = (None, "left", "top", "none")
 
 
+class _Unset:
+    def __repr__(self):
+        return "<unset>"
+
+
+_UNSET = _Unset()   # sentinel: tells "scanpy alias not passed" from "passed None"
+
+
 def _is_name_list(spec) -> bool:
     """True for a list/tuple of strings (= panel names for a color-by grid),
     as opposed to a raw per-point vector (which must be an ndarray/Series)."""
@@ -46,6 +54,26 @@ def _is_name_list(spec) -> bool:
         and len(spec) > 0
         and all(isinstance(e, str) for e in spec)
     )
+
+
+def _maybe_save(obj, save):
+    """scanpy-style ``save=``: write the plot to a file. ``.html`` is supported
+    programmatically (self-contained); image formats need the in-plot button."""
+    if not save:
+        return
+    import pathlib
+
+    ext = pathlib.Path(str(save)).suffix.lower()
+    if ext in (".html", ".htm"):
+        if not hasattr(obj, "to_html"):
+            raise ValueError("save= to .html is for a single plot, not a grid.")
+        obj.to_html(save)
+    else:
+        raise ValueError(
+            f"save={save!r}: only '.html' is supported programmatically right now "
+            "(a self-contained, offline file). For PNG/SVG/PDF, show the plot with "
+            "enable_download=True and use its download button."
+        )
 
 
 def _resolve_numeric(spec, data, layer=None, param="size_by"):
@@ -116,6 +144,15 @@ def _resolve_cols(spec, data):
 def scatterplot(
     data: Any = None,
     *,
+    # --- scanpy-style names (preferred) -------------------------------------
+    color: Any = _UNSET,            # alias of color_by (name, list of names, or vector)
+    size: Any = _UNSET,             # scalar -> point_size; name/array -> size_by
+    cmap: Any = _UNSET,             # alias of continuous_palette
+    palette: Any = _UNSET,          # alias of categorical_palette
+    components: Any = _UNSET,       # 1-based embedding dims, e.g. (1, 2); alias of dims
+    ncols: Optional[int] = None,    # grid columns when color is a list
+    save: Optional[str] = None,     # write to a file (.html now; see docs)
+    # --- original names (still supported as aliases) ------------------------
     basis: Optional[Union[str, int]] = None,
     x: Optional[Union[str, int]] = None,
     y: Optional[Union[str, int]] = None,
@@ -217,7 +254,31 @@ def scatterplot(
     Returns
     -------
     The widget object (displays inline in notebooks).
+
+    Notes
+    -----
+    Argument names follow scanpy where possible — ``color``, ``size``, ``cmap``,
+    ``palette``, ``components`` (1-based), ``ncols``, ``layer``, ``vmin``/``vmax``,
+    ``save`` — and the original names (``color_by``, ``point_size``,
+    ``continuous_palette``, ``categorical_palette``, ``dims`` …) keep working.
     """
+    # --- scanpy-style aliases win over the original names when given --------
+    if color is not _UNSET:
+        color_by = color
+    if size is not _UNSET:
+        if isinstance(size, bool):
+            raise TypeError("size must be a number or a column/feature name.")
+        if isinstance(size, (int, float)):
+            point_size = size           # scalar -> global point size
+        else:
+            size_by = size              # name / array -> per-point size
+    if cmap is not _UNSET:
+        continuous_palette = cmap
+    if palette is not _UNSET:
+        categorical_palette = palette
+    if components is not _UNSET and components is not None:
+        dims = tuple(int(c) - 1 for c in components)   # 1-based -> 0-based
+
     # --- validate enum-ish arguments up front (fail before doing work) ------
     if backend not in ("regl", "jscatter"):
         raise ValueError(
@@ -264,7 +325,9 @@ def scatterplot(
             )
             for name in color_by
         ]
-        return compose(panels)
+        grid = compose(panels, cols=ncols)
+        _maybe_save(grid, save)
+        return grid
 
     # --- resolve the effective embedding (basis is preferred; x is alias) ---
     is_object = _is_anndata(data) or _is_mudata(data) or _is_spatialdata(data)
@@ -345,6 +408,7 @@ def scatterplot(
         widget._width = w
         widget._source = data   # so w.annotate(...) can write back to obs/colData
         widget._spec = spec
+        _maybe_save(widget, save)
         return widget
 
     # Default: a static, self-contained plot — renders with no comm and reopens
@@ -353,6 +417,7 @@ def scatterplot(
     from ._widget import StaticPlot
 
     plot = StaticPlot(spec=spec, source=data, height=int(height), width=w)
+    _maybe_save(plot, save)
     return plot
 
 

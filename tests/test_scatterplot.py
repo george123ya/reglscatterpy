@@ -103,6 +103,55 @@ def test_size_by_obs_column_still_works(adata):
     assert w._spec["sizeBy"] is True
 
 
+# --- scanpy-aligned argument names ----------------------------------------- #
+def test_color_alias_matches_color_by(adata):
+    a = rs.scatterplot(adata, basis="umap", color="celltype", show=False)
+    b = rs.scatterplot(adata, basis="umap", color_by="celltype", show=False)
+    assert a._spec["x"] == b._spec["x"]
+    assert a._spec.get("colorVar") == b._spec.get("colorVar") == "celltype"
+
+
+def test_size_scalar_vs_name(adata):
+    big = rs.scatterplot(adata, basis="umap", size=12, show=False)
+    assert big._spec["options"]["size"] == 12
+    per = rs.scatterplot(adata, basis="umap", size="Gene3", show=False)  # gene -> per-point
+    assert per._spec["sizeBy"] is True
+
+
+def test_components_is_one_based(adata):
+    adata.obsm["X_pca"] = __import__("numpy").random.RandomState(3).randn(adata.n_obs, 4)
+    a = rs.scatterplot(adata, basis="pca", components=(2, 3), show=False)
+    b = rs.scatterplot(adata, basis="pca", dims=(1, 2), show=False)   # 0-based equivalent
+    assert a._spec["x"] == b._spec["x"]
+    assert a._spec["xlab"] == "PCA 2"
+
+
+def test_cmap_and_palette_aliases(adata):
+    w = rs.scatterplot(adata, basis="umap", color="Gene3", cmap="magma", show=False)
+    assert w._spec is not None       # resolves without error (magma is valid)
+    w2 = rs.scatterplot(adata, basis="umap", color="celltype", palette="Dark2", show=False)
+    assert w2._spec is not None
+
+
+def test_ncols_in_grid(adata):
+    g = rs.scatterplot(adata, basis="umap", color=["celltype", "Gene3", "Gene4"],
+                       ncols=3, show=False)
+    cols = g.layout.grid_template_columns
+    assert "repeat(3" in cols
+
+
+def test_save_html(tmp_path, adata):
+    out = tmp_path / "p.html"
+    rs.scatterplot(adata, basis="umap", color="celltype", save=str(out), show=False)
+    assert out.exists() and "<iframe" not in out.read_text()[:20]  # full standalone page
+
+
+def test_save_bad_extension_raises(tmp_path, adata):
+    with pytest.raises(ValueError, match="only '.html'"):
+        rs.scatterplot(adata, basis="umap", color="celltype",
+                       save=str(tmp_path / "p.png"), show=False)
+
+
 # --- Change 4: clear error messages ---------------------------------------- #
 def test_bad_color_name_suggests(adata):
     with pytest.raises(KeyError) as e:
