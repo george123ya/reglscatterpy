@@ -127,8 +127,16 @@ def _make_classes():
                 out["fraction"] = counts / counts.sum()
             return out
 
-        def diff_expression(self, group_a=None, group_b=None, n=10, layer=None):
-            """Top differential genes between two cell groups (AnnData/MuData)."""
+        def diff_expression(self, group_a=None, group_b=None, n=10, layer=None,
+                            method="wilcoxon"):
+            """Top differential genes between two cell groups.
+
+            ``group_a`` defaults to the lasso selection; ``group_b`` to the rest.
+            When **scanpy** is installed (and the source is an AnnData) this runs
+            ``sc.tl.rank_genes_groups`` on a copy and returns its result frame
+            (names / scores / logfoldchanges / pvals / pvals_adj). Otherwise it
+            falls back to a Welch t-test. AnnData/MuData only.
+            """
             import numpy as np
             import pandas as pd
 
@@ -139,12 +147,30 @@ def _make_classes():
             a_idx = self.selection if group_a is None else [int(i) for i in group_a]
             if not a_idx:
                 raise ValueError("Group A is empty - lasso some cells first.")
-            a_mask = np.zeros(n_obs, dtype=bool); a_mask[a_idx] = True
-            if group_b is None:
-                b_mask = ~a_mask
-            else:
-                b_mask = np.zeros(n_obs, dtype=bool); b_mask[[int(i) for i in group_b]] = True
+            labels = np.array(["rest"] * n_obs, dtype=object)
+            labels[a_idx] = "A"
+            ref = "rest"
+            if group_b is not None:
+                labels[[int(i) for i in group_b]] = "B"
+                ref = "B"
 
+            # Preferred path: scanpy's rank_genes_groups (AnnData only).
+            if type(src).__name__ == "AnnData":
+                try:
+                    import scanpy as sc
+
+                    ad = src.copy()
+                    ad.obs["_rs_grp"] = pd.Categorical(labels)
+                    sc.tl.rank_genes_groups(
+                        ad, "_rs_grp", groups=["A"], reference=ref,
+                        method=method, layer=layer, n_genes=n,
+                    )
+                    return sc.get.rank_genes_groups_df(ad, group="A").head(n).reset_index(drop=True)
+                except ImportError:
+                    pass  # fall back to the built-in test below
+
+            a_mask = labels == "A"
+            b_mask = labels == ref
             X = src.layers[layer] if layer else src.X
             Xa, Xb = X[a_mask], X[b_mask]
             if hasattr(Xa, "toarray"):
