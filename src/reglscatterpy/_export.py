@@ -173,9 +173,12 @@ def iframe_srcdoc(widget, title="reglscatterpy plot"):
         .replace("__FRAGMENT__", _fragment(widget))
     )
     srcdoc = _html.escape(page, quote=True)
+    w = int(state.get("_width") or 0)        # 0 => responsive (full cell width)
+    wcss = f"{w}px" if w else "100%"
     return (
         f'<iframe srcdoc="{srcdoc}" '
-        f'style="width:100%;height:{height + 4}px;border:none;display:block" '
+        f'style="width:{wcss};max-width:100%;height:{height + 4}px;'
+        'border:none;display:block" '
         'sandbox="allow-scripts allow-same-origin" '
         'loading="lazy" title="reglscatterpy plot"></iframe>'
     )
