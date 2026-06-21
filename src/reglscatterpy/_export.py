@@ -206,7 +206,7 @@ _PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
-<style>html, body { margin: 0; padding: 0; background: __PAGEBG__; }</style>
+<style>html, body { margin: 0; padding: 0; background: __PAGEBG__; overflow: hidden; }</style>
 <script>__LOADER__</script>
 </head>
 <body>
