@@ -309,6 +309,11 @@ def scatterplot(
             f"{[c for c in _TOOLBAR_CHOICES if c is not None]} or None."
         )
 
+    # A single-element list is just one plot (scanpy's color=['gene']) — unwrap
+    # so it renders as a normal single plot (700px), not a full-width 1-up grid.
+    if _is_name_list(color_by) and len(color_by) == 1:
+        color_by = color_by[0]
+
     # --- color_by as a list of names -> one linked panel per value ----------
     if _is_name_list(color_by):
         if backend != "regl":

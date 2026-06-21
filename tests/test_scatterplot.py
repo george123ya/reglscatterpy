@@ -185,6 +185,12 @@ def test_cmap_and_palette_aliases(adata):
     assert w2._spec is not None
 
 
+def test_single_element_color_list_is_single_plot(adata):
+    w = rs.scatterplot(adata, basis="umap", color=["Gene0"], show=False)
+    assert type(w).__name__ != "GridBox"   # not a 1-up full-width grid
+    assert w._width == 700                  # respects the default fixed width
+
+
 def test_ncols_in_grid(adata):
     g = rs.scatterplot(adata, basis="umap", color=["celltype", "Gene3", "Gene4"],
                        ncols=3, show=False)
