@@ -42,13 +42,27 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync: bool = True):
     plots = list(plots)
     if not plots:
         raise ValueError("compose() needs at least one plot.")
-    from ._widget import is_live_widget
-    if not all(is_live_widget(p) for p in plots):
-        raise ValueError(
-            "compose() needs live (interactive) plots — a linked grid syncs over "
-            "the kernel. Build each plot with scatterplot(..., interactive=True), "
-            "or pass a list to color_by= which does this for you."
-        )
+
+    # A linked grid syncs over the kernel, so each panel must be a live widget.
+    # Auto-upgrade plain (default static) plots so you DON'T have to pass
+    # interactive=True to every scatterplot() — just compose([a, b]).
+    from ._widget import ReglScatter, is_live_widget
+
+    def _as_live(p):
+        if is_live_widget(p):
+            return p
+        spec = dict(getattr(p, "_spec", {}) or {})
+        if not spec:
+            raise TypeError("compose() takes reglscatterpy plots (from scatterplot()).")
+        w = ReglScatter()
+        w._height = int(getattr(p, "_height", 500) or 500)
+        w._width = int(getattr(p, "_width", 0) or 0)
+        w._source = getattr(p, "_source", None)
+        w._draw_order = getattr(p, "_draw_order", None)
+        w._spec = spec
+        return w
+
+    plots = [_as_live(p) for p in plots]
     if len(plots) > 16:
         import warnings
         warnings.warn(
@@ -64,6 +78,7 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync: bool = True):
         spec["plotId"] = pid
         spec["syncPlots"] = group
         spec["syncState"] = bool(sync)
+        w._width = 0   # panels are responsive so they fit their grid column
         w._spec = spec  # re-renders the widget with the sync wiring
 
     cols = cols or ceil(sqrt(len(plots)))

@@ -185,6 +185,16 @@ def test_cmap_and_palette_aliases(adata):
     assert w2._spec is not None
 
 
+def test_compose_accepts_plain_plots(adata):
+    from reglscatterpy import _widget
+    a = rs.scatterplot(adata, basis="umap", color="celltype")   # no interactive=True
+    b = rs.scatterplot(adata, basis="umap", color="Gene3")
+    g = rs.compose([a, b])                                        # auto-upgraded
+    assert type(g).__name__ == "GridBox"
+    assert all(_widget.is_live_widget(c) for c in g.children)
+    assert all(c._width == 0 for c in g.children)                # responsive in the grid
+
+
 def test_single_element_color_list_is_single_plot(adata):
     w = rs.scatterplot(adata, basis="umap", color=["Gene0"], show=False)
     assert type(w).__name__ != "GridBox"   # not a 1-up full-width grid

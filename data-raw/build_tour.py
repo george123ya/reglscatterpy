@@ -129,11 +129,11 @@ code("w.annotate('my_label', 'group A')   # writes adata.obs['my_label'] for the
      "rs.scatterplot(adata, basis='umap', color='my_label')")
 
 md("## 12. Linked grid (`compose`)\n"
-   "Compose pre-built **interactive** plots — pan/zoom and lasso stay in sync across panels.")
-code("from reglscatterpy import compose\n"
-     "a = rs.scatterplot(adata, basis='umap', color='cluster', interactive=True)\n"
-     "b = rs.scatterplot(adata, basis='pca',  color='cluster', interactive=True)\n"
-     "compose([a, b])")
+   "Pass plots to `rs.compose(...)` — pan/zoom and lasso stay in sync across panels. "
+   "`compose` makes the panels interactive for you (no need for `interactive=True` on each).")
+code("a = rs.scatterplot(adata, basis='umap', color='cluster')\n"
+     "b = rs.scatterplot(adata, basis='pca',  color='cluster')\n"
+     "rs.compose([a, b])")
 
 md("## 13. Width\n"
    "Plots are **700 px** by default. Pass `width=` (px), or `width=None` to fill the cell.")
