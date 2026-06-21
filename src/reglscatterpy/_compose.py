@@ -42,6 +42,13 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync: bool = True):
     plots = list(plots)
     if not plots:
         raise ValueError("compose() needs at least one plot.")
+    from ._widget import is_live_widget
+    if not all(is_live_widget(p) for p in plots):
+        raise ValueError(
+            "compose() needs live (interactive) plots — a linked grid syncs over "
+            "the kernel. Build each plot with scatterplot(..., interactive=True), "
+            "or pass a list to color_by= which does this for you."
+        )
     if len(plots) > 16:
         import warnings
         warnings.warn(

@@ -167,6 +167,7 @@ def scatterplot(
     width: Optional[int] = None,
     height: int = 500,
     backend: str = "regl",
+    interactive: bool = False,
     show: bool = True,
     **backend_kwargs: Any,
 ):
@@ -257,7 +258,8 @@ def scatterplot(
                 legend_font_size=legend_font_size, auto_fit=auto_fit,
                 range_padding=range_padding, xrange=xrange, yrange=yrange,
                 filter_by=filter_by, point_labels=point_labels, plot_id=None,
-                width=width, height=height, backend=backend, show=False,
+                width=width, height=height, backend=backend,
+                interactive=True, show=False,  # linked sync needs live widgets
                 **backend_kwargs,
             )
             for name in color_by
@@ -333,14 +335,25 @@ def scatterplot(
         point_labels=point_labels, plot_id=plot_id, filter_by=filter_by,
     )
 
-    from ._widget import ReglScatter
+    w = int(width) if width else 0   # 0 => responsive (100%)
+    if interactive:
+        # Live, kernel-linked widget: w.selection round-trips (needs a kernel).
+        from ._widget import ReglScatter
 
-    widget = ReglScatter()
-    widget._height = int(height)
-    widget._width = int(width) if width else 0   # 0 => responsive (100%)
-    widget._source = data   # so w.annotate(...) can write back to obs/colData
-    widget._spec = spec
-    return widget
+        widget = ReglScatter()
+        widget._height = int(height)
+        widget._width = w
+        widget._source = data   # so w.annotate(...) can write back to obs/colData
+        widget._spec = spec
+        return widget
+
+    # Default: a static, self-contained plot — renders with no comm and reopens
+    # with no kernel (like a plotly figure), and is NOT an ipywidget, so nothing
+    # is written to the notebook's widget-state.
+    from ._widget import StaticPlot
+
+    plot = StaticPlot(spec=spec, source=data, height=int(height), width=w)
+    return plot
 
 
 def _scatterplot_jscatter(

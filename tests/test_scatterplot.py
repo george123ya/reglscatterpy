@@ -50,6 +50,27 @@ def test_basis_on_dataframe_raises():
         rs.scatterplot(df, x="u1", y="u2", basis="umap", show=False)
 
 
+# --- Static-by-default render (no widget) ---------------------------------- #
+def test_default_render_is_static_iframe(adata):
+    w = rs.scatterplot(adata, basis="umap", color_by="celltype", show=False)
+    bundle = w._repr_mimebundle_()
+    data = bundle[0] if isinstance(bundle, tuple) else bundle
+    assert "text/html" in data
+    assert "application/vnd.jupyter.widget-view+json" not in data  # no live comm
+    html = data["text/html"]
+    assert "<iframe" in html and "srcdoc=" in html
+    # srcdoc is HTML-escaped, so quotes become entities; check the unquoted stem
+    assert "DecompressionStream(" in html  # self-contained bundle inlined
+
+
+def test_interactive_render_is_live_widget(adata):
+    w = rs.scatterplot(adata, basis="umap", color_by="celltype",
+                       interactive=True, show=False)
+    bundle = w._repr_mimebundle_()
+    data = bundle[0] if isinstance(bundle, tuple) else bundle
+    assert "application/vnd.jupyter.widget-view+json" in data  # live comm widget
+
+
 # --- Change 2: color_by list -> linked grid -------------------------------- #
 def test_color_by_list_makes_linked_grid(adata):
     w = rs.scatterplot(adata, basis="umap", color_by=["celltype", "Gene3"], show=False)

@@ -153,6 +153,34 @@ def _fragment(widget, div_id=None):
     )
 
 
+def iframe_srcdoc(widget, title="reglscatterpy plot"):
+    """A self-contained plot wrapped in an ``<iframe srcdoc>``.
+
+    This is the default (no-widget) render. Unlike a bare ``<script>`` in a cell
+    output — which JupyterLab only runs when trusted and VS Code won't run at all
+    — an ``<iframe srcdoc>`` is a real nested document whose scripts execute in
+    JupyterLab 4, Notebook 7 and VS Code, and it is plain static HTML baked into
+    the cell output, so it **survives reopening the notebook with no kernel**
+    (the folium / pydeck pattern). The whole page (loader + gzipped bundle +
+    data) lives inside the srcdoc, so each iframe is self-sufficient.
+    """
+    state, height = _state(widget)
+    spec = state["_spec"]
+    page = (
+        _PAGE.replace("__TITLE__", _html.escape(str(title)))
+        .replace("__PAGEBG__", str(spec.get("backgroundColor") or "#ffffff"))
+        .replace("__LOADER__", _LOADER_JS + _bundle_call())
+        .replace("__FRAGMENT__", _fragment(widget))
+    )
+    srcdoc = _html.escape(page, quote=True)
+    return (
+        f'<iframe srcdoc="{srcdoc}" '
+        f'style="width:100%;height:{height + 4}px;border:none;display:block" '
+        'sandbox="allow-scripts allow-same-origin" '
+        'loading="lazy" title="reglscatterpy plot"></iframe>'
+    )
+
+
 def report_fragment(widget):
     """Shared-bundle fragment (the bundle is injected once by the exporter)."""
     return _fragment(widget)

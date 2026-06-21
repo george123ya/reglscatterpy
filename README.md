@@ -63,11 +63,28 @@ fixed size.
 | **`filter_by` distribution sliders** | **Linked grid (`compose`)** |
 | ![Range-filter sliders with histograms](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/filter-sliders.png) | ![Two embeddings with synced camera and selection](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/linked-grid.png) |
 
-> **Note:** like other Jupyter widgets, a plot's large state isn't reliably
-> saved into the `.ipynb`, so after **reopening** a notebook the cell may show
-> blank (or `Could not render … widget-view`) until you **re-run** it. To keep
-> an interactive copy that survives reopening — and to share a plot with someone
-> who has no kernel — export it to a standalone HTML file (see below).
+## Static by default, interactive on request
+
+By default a plot renders as a **self-contained snapshot** (a sandboxed
+`<iframe>` with the WebGL bundle and data baked in) — like a plotly figure, it
+shows in JupyterLab, Notebook 7, VS Code and Colab, and **survives reopening the
+notebook with no kernel** (no re-run, no blank `widget-view`). It stays fully
+interactive *visually* — pan, zoom, lasso, legend, tooltips, PNG/SVG/PDF export —
+but, having no kernel link, it can't send a selection back to Python.
+
+For the **Python round-trip** (`w.selection`, `annotate`, `diff_expression`,
+linked `compose` grids) pass `interactive=True` to get the live, kernel-linked
+widget:
+
+```python
+w = rs.scatterplot(adata, basis="umap", color_by="leiden", interactive=True)
+w                          # lasso some cells…
+adata[w.selection]         # …read them back in Python
+```
+
+> The live widget needs a running kernel (and, like any Jupyter widget, may show
+> blank on reopen). The static default does not — so use the default for figures
+> you want to keep/share, and `interactive=True` while you're actively selecting.
 
 ## Save a standalone HTML (offline, kernel-free)
 
@@ -128,10 +145,10 @@ if you need the surrounding report shell to be 100% offline too.
 ## Selection round-trip
 
 Lasso points in the plot, then read them back in another cell — or drive the
-selection from Python:
+selection from Python. This needs the live widget, so pass `interactive=True`:
 
 ```python
-w = rs.scatterplot(adata, x="X_umap", color_by="leiden")
+w = rs.scatterplot(adata, basis="umap", color_by="leiden", interactive=True)
 w                          # show it, lasso some cells in the widget
 
 w.selection                # -> [12, 87, 134, ...]  positional indices
@@ -147,7 +164,7 @@ Lasso a population, label it, and the label is written straight back into
 `adata.obs` (or a DataFrame column) — curate cell types interactively:
 
 ```python
-w = rs.scatterplot(adata, x="X_umap", color_by="leiden")
+w = rs.scatterplot(adata, basis="umap", color_by="leiden", interactive=True)
 w                                  # lasso a cluster
 w.annotate("cell_type", "T cells") # -> writes adata.obs["cell_type"] for those cells
 # lasso another, w.annotate("cell_type", "B cells"), ... then:
@@ -159,7 +176,7 @@ rs.scatterplot(adata, x="X_umap", color_by="cell_type")
 Lasso a population and get its top markers vs the rest (or vs another lasso):
 
 ```python
-w = rs.scatterplot(adata, x="X_umap", color_by="leiden")
+w = rs.scatterplot(adata, basis="umap", color_by="leiden", interactive=True)
 w                          # lasso a cluster
 w.diff_expression(n=10)    # top genes for the selection vs all other cells
 # or two saved selections:
@@ -182,7 +199,7 @@ rs.scatterplot(adata, x="X_umap", color_by="leiden",
 Lasso a region and see what it's made of:
 
 ```python
-w = rs.scatterplot(adata, x="X_umap", color_by="leiden")
+w = rs.scatterplot(adata, basis="umap", color_by="leiden", interactive=True)
 w                                  # lasso a region
 w.composition("leiden")            # -> count + fraction per cluster in the selection
 ```
@@ -200,13 +217,14 @@ rs.scatterplot(adata, basis="umap", color_by=["louvain", "CST3", "NKG7"])
 > A *list of names* means "one panel per name". A raw per-point colour vector must
 > be a numpy array / pandas Series (not a list of strings).
 
-Or compose pre-built plots — e.g. compare different embeddings side by side:
+Or compose pre-built plots — e.g. compare different embeddings side by side.
+Linked grids sync over the kernel, so build the panels with `interactive=True`:
 
 ```python
 from reglscatterpy import scatterplot, compose
 
-a = scatterplot(adata, basis="umap", color_by="leiden")
-b = scatterplot(adata, basis="pca",  color_by="leiden")
+a = scatterplot(adata, basis="umap", color_by="leiden", interactive=True)
+b = scatterplot(adata, basis="pca",  color_by="leiden", interactive=True)
 compose([a, b])            # 2-up grid, linked camera + selection
 ```
 

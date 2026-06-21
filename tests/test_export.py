@@ -81,11 +81,19 @@ def test_record_mode_emits_self_contained_html():
         assert "window.__rsBundleURL" in frag
     finally:
         rs.record_html(False)
-    # Off again -> normal interactive widget view (ipywidgets returns a
-    # (data, metadata) tuple here; record mode returns a plain dict).
+    # Off again -> the default is now the static iframe snapshot (no live comm).
     off = _widget()._repr_mimebundle_()
     data = off[0] if isinstance(off, tuple) else off
-    assert "application/vnd.jupyter.widget-view+json" in data
+    assert "application/vnd.jupyter.widget-view+json" not in data
+    assert "<iframe" in data["text/html"]
+    # The live, kernel-linked widget view is opt-in via interactive=True.
+    wi = rs.scatterplot(
+        pd.DataFrame({"x": [0.0, 1.0], "y": [1.0, 0.0], "ct": ["a", "b"]}),
+        x="x", y="y", color_by="ct", interactive=True,
+    )
+    di = wi._repr_mimebundle_()
+    di = di[0] if isinstance(di, tuple) else di
+    assert "application/vnd.jupyter.widget-view+json" in di
 
 
 def _make_nb(tmp_path, record):

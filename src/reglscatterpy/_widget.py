@@ -1,104 +1,66 @@
-"""The anywidget that renders the shared reglScatterplot widget.
+"""Plot objects: a static (no-widget) default and a live anywidget.
 
-``static/widget.js`` is an ESM bundle built from ``js/src/anywidget.js`` (see
-the repo's ``js/`` directory). It loads the *same* compiled widget the R package
-uses via a tiny ``HTMLWidgets`` shim and drives it directly, so a plot looks and
-behaves identically whether created from R (htmlwidgets) or Python (anywidget):
-the draggable legend, lasso, tooltips, sync and PNG/SVG/PDF export all come from
-one codebase.
+``scatterplot()`` returns one of two objects that share the same analysis API
+(``selection`` / ``subset`` / ``annotate`` / ``composition`` /
+``diff_expression`` / ``to_html``):
 
-The Python side hands the widget a ``_spec`` dict built by
-:func:`reglscatterpy._payload.build_payload`, which is a byte-for-byte port of
-the R payload (locked down by ``tests/test_payload_parity``).
+* :class:`StaticPlot` (default) — a plain Python object, **not** an ipywidget.
+  Its ``_repr_mimebundle_`` emits a self-contained ``<iframe srcdoc>`` snapshot,
+  so it renders in JupyterLab / Notebook 7 / VS Code and **survives reopening
+  with no kernel** (like a plotly figure). Because it is not a widget, nothing
+  is written to the notebook's widget-state, so the ``.ipynb`` stays small.
+  Trade-off: no live Python round-trip (``w.selection`` is empty unless a future
+  local bridge fills it).
+
+* ``ReglScatter`` (``interactive=True``) — the anywidget that drives the shared
+  reglScatterplot bundle over the kernel comm, so ``w.selection`` round-trips
+  live (needed for the single-cell workflows and for linked ``compose`` grids).
+
+Both render the *same* compiled ``static/widget.js`` (a byte-for-byte port of the
+R payload), so plots look identical across R and Python.
 """
 
 from __future__ import annotations
 
 import pathlib
 
-__all__ = ["ReglScatter"]
+__all__ = ["ReglScatter", "StaticPlot", "is_live_widget"]
 
 _STATIC = pathlib.Path(__file__).parent / "static" / "widget.js"
 
 
-def _make_class():
+def _make_classes():
     try:
         import anywidget
         import traitlets
     except ModuleNotFoundError as exc:  # pragma: no cover - import guard
         raise ModuleNotFoundError(
-            "reglscatterpy's default renderer needs 'anywidget'. "
+            "reglscatterpy's renderer needs 'anywidget'. "
             "Install with: pip install reglscatterpy"
         ) from exc
 
-    class ReglScatter(anywidget.AnyWidget):
-        _esm = _STATIC
-        _spec = traitlets.Dict().tag(sync=True)
-        _height = traitlets.Int(500).tag(sync=True)
-        # 0 => responsive (100% of the cell); a positive value => fixed px width.
-        _width = traitlets.Int(0).tag(sync=True)
-        # Selected point indices, kept in sync both ways with the lasso.
-        _selection = traitlets.List(trait=traitlets.Int()).tag(sync=True)
+    class _PlotAPI:
+        """Analysis API shared by the static plot and the live widget.
 
-        def update(self, spec: dict) -> "ReglScatter":
-            """Swap in a new payload and re-render in place."""
-            self._spec = spec
-            return self
+        Operates on ``self._spec``, ``self._source`` and ``self._selection``
+        (a synced trait on the live widget, a plain list on the static plot).
+        """
 
         def to_html(self, path, title="reglscatterpy plot"):
-            """Save this plot as a standalone, offline HTML file.
-
-            Like R's ``htmlwidgets::saveWidget`` - the file inlines the widget
-            and the plot's data, so it stays interactive after a notebook is
-            closed and reopened (a kernel-free snapshot; no Python
-            round-trip). ``w.to_html("umap.html")``.
-            """
+            """Save this plot as a standalone, offline HTML file (like R's
+            ``htmlwidgets::saveWidget``) — inlines the bundle and data, stays
+            interactive with no kernel."""
             from ._export import save_html
 
             return save_html(self, path, title=title)
 
-        def _repr_mimebundle_(self, **kwargs):
-            # In a live notebook this returns the normal interactive widget
-            # view. During a report export (save_notebook_html flips report
-            # mode on, in that kernel only) it instead returns a self-contained
-            # text/html snapshot — and drops the widget view so nbconvert bakes
-            # the static, kernel-free plot in unambiguously.
-            from . import _export
-
-            try:
-                if _export._report_repr_enabled():
-                    return {
-                        "text/html": _export.report_fragment(self),
-                        "text/plain": repr(self),
-                    }
-                if _export._record_enabled():
-                    return {
-                        "text/html": _export.record_fragment(self),
-                        "text/plain": repr(self),
-                    }
-            except Exception:
-                pass
-            return super()._repr_mimebundle_(**kwargs)
-
-        def __repr__(self):
-            # Shown as the text/plain fallback when a host can't render the
-            # live widget view - e.g. a reopened notebook whose widget state
-            # wasn't saved. A clean summary beats the default object address;
-            # the hint tells the user how to get the plot back.
-            spec = self._spec or {}
-            n = spec.get("n_points")
-            by = spec.get("colorVar") or spec.get("groupVar")
-            bits = ["reglscatterpy plot"]
-            if n is not None:
-                bits.append(f"{n:,} points")
-            if by:
-                bits.append(f"color_by={by!r}")
-            head = ", ".join(bits)
-            return f"<{head}> (re-run this cell to render the interactive plot)"
-
         @property
         def selection(self):
-            """Indices of the lasso-selected points (read or assign)."""
+            """Indices of the lasso-selected points (read or assign).
+
+            Live (``interactive=True``) only — on a static plot this stays empty
+            because there is no kernel link.
+            """
             return list(self._selection)
 
         @selection.setter
@@ -106,13 +68,7 @@ def _make_class():
             self._selection = [int(i) for i in (indices or [])]
 
         def subset(self, selection=None):
-            """The source object subset to the selected cells.
-
-            Equivalent to ``adata[w.selection]`` (the indices are positional, in
-            the plotted order), returned as an ``AnnData`` / ``MuData`` view or a
-            DataFrame slice — so you can keep analysing the lassoed cells:
-            ``sub = w.subset(); sc.tl.rank_genes_groups(sub, ...)``.
-            """
+            """The source object subset to the selected cells (``adata[w.selection]``)."""
             sel = self.selection if selection is None else [int(i) for i in selection]
             src = getattr(self, "_source", None)
             if src is None:
@@ -122,15 +78,8 @@ def _make_class():
             return src.iloc[sel]          # DataFrame
 
         def annotate(self, key, label, selection=None):
-            """Write a label onto the lasso-selected cells.
-
-            Lasso a population in the plot, then ``w.annotate("cell_type",
-            "T cells")`` writes that label into ``obs[key]`` (AnnData / MuData)
-            or the column ``key`` (DataFrame) of the object this plot was made
-            from, for the currently selected rows. Call repeatedly with
-            different labels to build up an annotation; re-plot ``color_by=key``
-            to see it. Returns the annotated object.
-            """
+            """Write ``label`` onto the lasso-selected cells in ``obs[key]`` /
+            column ``key`` of the source object. Returns the annotated object."""
             import numpy as np
             import pandas as pd
 
@@ -161,13 +110,7 @@ def _make_class():
             return src
 
         def composition(self, by, selection=None, normalize=True):
-            """Composition of the lasso-selected cells by an ``obs`` column.
-
-            ``w.composition("leiden")`` returns a DataFrame of the count and
-            fraction of the selected cells in each category of ``by`` - e.g. to
-            see which clusters a lassoed region is made of. ``normalize=False``
-            drops the fraction column.
-            """
+            """Count + fraction of the selected cells in each category of ``by``."""
             import pandas as pd
 
             sel = self.selection if selection is None else [int(i) for i in selection]
@@ -185,16 +128,7 @@ def _make_class():
             return out
 
         def diff_expression(self, group_a=None, group_b=None, n=10, layer=None):
-            """Top differential genes between two cell groups.
-
-            ``group_a`` defaults to the current lasso selection; ``group_b``
-            defaults to all other cells ("rest"). Pass explicit index lists to
-            compare two saved selections (e.g. ``a = w.selection`` after one
-            lasso, then ``w.diff_expression(a, w.selection)`` after another).
-            Ranks genes by a Welch t-statistic (falls back to a standardised
-            mean difference if SciPy is absent) and returns the top ``n`` by
-            absolute effect, with ``logFC`` and group means. AnnData/MuData only.
-            """
+            """Top differential genes between two cell groups (AnnData/MuData)."""
             import numpy as np
             import pandas as pd
 
@@ -232,16 +166,94 @@ def _make_class():
             res = res.reindex(res["stat"].abs().sort_values(ascending=False).index)
             return res.head(n).reset_index(drop=True)
 
-    return ReglScatter
+        def __repr__(self):
+            spec = getattr(self, "_spec", None) or {}
+            n = spec.get("n_points")
+            by = spec.get("colorVar") or spec.get("groupVar")
+            bits = ["reglscatterpy plot"]
+            if n is not None:
+                bits.append(f"{n:,} points")
+            if by:
+                bits.append(f"color_by={by!r}")
+            return "<" + ", ".join(bits) + ">"
+
+        def _export_mimebundle(self):
+            """Static (no-comm) mimebundle, honouring report/record export modes."""
+            from . import _export
+
+            if _export._report_repr_enabled():
+                html = _export.report_fragment(self)
+            elif _export._record_enabled():
+                html = _export.record_fragment(self)
+            else:
+                html = _export.iframe_srcdoc(self)
+            return {"text/html": html, "text/plain": repr(self)}
+
+    class StaticPlot(_PlotAPI):
+        """Default plot object: a self-contained iframe snapshot, not a widget."""
+
+        def __init__(self, spec=None, source=None, height=500, width=0):
+            self._spec = dict(spec or {})
+            self._source = source
+            self._height = int(height)
+            self._width = int(width)
+            self._selection = []
+
+        def update(self, spec):
+            self._spec = dict(spec)
+            return self
+
+        def _repr_mimebundle_(self, **kwargs):
+            return self._export_mimebundle()
+
+    class ReglScatter(anywidget.AnyWidget, _PlotAPI):
+        """Live anywidget (``interactive=True``): kernel-linked, w.selection round-trips."""
+
+        _esm = _STATIC
+        _spec = traitlets.Dict().tag(sync=True)
+        _height = traitlets.Int(500).tag(sync=True)
+        _width = traitlets.Int(0).tag(sync=True)
+        _selection = traitlets.List(trait=traitlets.Int()).tag(sync=True)
+
+        def update(self, spec: dict) -> "ReglScatter":
+            self._spec = spec
+            return self
+
+        def _repr_mimebundle_(self, **kwargs):
+            # In an export kernel (report/record mode) emit the static snapshot;
+            # otherwise the live widget view for the kernel round-trip.
+            from . import _export
+
+            try:
+                if _export._report_repr_enabled() or _export._record_enabled():
+                    return self._export_mimebundle()
+            except Exception:
+                pass
+            return super()._repr_mimebundle_(**kwargs)
+
+    return StaticPlot, ReglScatter
 
 
-# Lazily built so importing reglscatterpy (e.g. just for `extract`) does not hard
-# require anywidget; the class is created on first use.
-_CLASS = None
+# Lazily built so importing reglscatterpy (e.g. just for `extract`) doesn't hard
+# require anywidget; the classes are created on first use.
+_CLASSES = None
+
+
+def _classes():
+    global _CLASSES
+    if _CLASSES is None:
+        _CLASSES = _make_classes()
+    return _CLASSES
+
+
+def StaticPlot(*args, **kwargs):  # noqa: N802 - factory mimics a class
+    return _classes()[0](*args, **kwargs)
 
 
 def ReglScatter(*args, **kwargs):  # noqa: N802 - factory mimics a class
-    global _CLASS
-    if _CLASS is None:
-        _CLASS = _make_class()
-    return _CLASS(*args, **kwargs)
+    return _classes()[1](*args, **kwargs)
+
+
+def is_live_widget(obj) -> bool:
+    """True if ``obj`` is the live anywidget (vs a static plot / other)."""
+    return isinstance(obj, _classes()[1])
