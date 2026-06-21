@@ -224,6 +224,7 @@ def scatterplot(
     height: int = 500,
     backend: str = "regl",
     interactive: bool = False,
+    fast: bool = False,             # experimental: binary transfer (implies interactive)
     show: bool = True,
     **backend_kwargs: Any,
 ):
@@ -297,6 +298,8 @@ def scatterplot(
         categorical_palette = palette
     if components is not _UNSET and components is not None:
         dims = tuple(int(c) - 1 for c in components)   # 1-based -> 0-based
+    if fast:
+        interactive = True   # binary transfer rides the live comm; needs a widget
 
     # --- validate enum-ish arguments up front (fail before doing work) ------
     if backend not in ("regl", "jscatter"):
@@ -447,6 +450,7 @@ def scatterplot(
         enable_download=enable_download, font_size=font_size,
         legend_font_size=legend_font_size, auto_fit=auto_fit,
         point_labels=point_labels, plot_id=plot_id, filter_by=filter_by,
+        binary=fast,
     )
 
     w = int(width) if width else 0   # 0 => responsive (100%)

@@ -74,6 +74,29 @@ def to_base64_u16_int(vec: Optional[np.ndarray]) -> Optional[str]:
 
 
 # --------------------------------------------------------------------------- #
+# raw quantizers (shared by base64 and the binary fast path)
+# --------------------------------------------------------------------------- #
+def _q_u16(vec) -> np.ndarray:        # x/y in [-1,1] -> uint16
+    v = np.clip(np.asarray(vec, "float64"), -1.0, 1.0)
+    ints = np.clip(np.rint((v + 1.0) * 32767.5).astype("int64"), 0, 65535)
+    return np.ascontiguousarray(ints.astype("<u2"))
+
+
+def _q_u16u(vec) -> np.ndarray:       # continuous in [0,1] -> uint16
+    v = np.clip(np.asarray(vec, "float64"), 0.0, 1.0)
+    ints = np.clip(np.rint(v * 65535).astype("int64"), 0, 65535)
+    return np.ascontiguousarray(ints.astype("<u2"))
+
+
+def _q_u16i(vec) -> np.ndarray:       # integer codes -> uint16
+    return np.ascontiguousarray(np.asarray(vec, "int64").astype("<u2"))
+
+
+def _q_f32(vec) -> np.ndarray:
+    return np.ascontiguousarray(np.asarray(vec, "<f4"))
+
+
+# --------------------------------------------------------------------------- #
 # range normalisation  (R/utils.R `.normaliseRange`, `.padRange`)
 # --------------------------------------------------------------------------- #
 def _pad_range(lo: float, hi: float, frac: float) -> tuple[float, float]:
@@ -321,8 +344,34 @@ def build_payload(
     point_labels=None,
     plot_id=None,
     filter_by=None,
+    binary=False,
 ) -> dict:
-    """Return the ``xData`` dict consumed by the bundled JS widget."""
+    """Return the ``xData`` dict consumed by the bundled JS widget.
+
+    With ``binary=True`` the big per-point channels (x/y/z/w) are emitted as raw
+    ``uint16`` ``memoryview``s instead of base64 strings — anywidget ships those
+    as binary comm buffers (no base64 inflation, no encode/decode). Only valid
+    for the live widget (the static export keeps base64). The JS decodes a
+    non-string channel using its known transform.
+    """
+    # binary-aware channel emitters (memoryview when binary, else base64 string)
+    def _u16(vec):
+        if vec is None:
+            return None
+        a = _q_u16(vec)
+        return memoryview(a) if binary else "base64u16:" + _b64(a.tobytes())
+
+    def _u16u(vec):
+        if vec is None:
+            return None
+        a = _q_u16u(vec)
+        return memoryview(a) if binary else "base64u16u:" + _b64(a.tobytes())
+
+    def _u16i(vec):
+        if vec is None:
+            return None
+        a = _q_u16i(vec)
+        return memoryview(a) if binary else "base64u16i:" + _b64(a.tobytes())
     x_vec = np.asarray(data.x, dtype="float64")
     y_vec = np.asarray(data.y, dtype="float64")
     n = int(x_vec.shape[0])
@@ -354,11 +403,11 @@ def build_payload(
     if z is not None:
         vt = legend.get("var_type")
         if vt == "continuous":
-            z_payload = to_base64_u16_unit(z)
+            z_payload = _u16u(z)
         elif vt == "categorical":
-            z_payload = to_base64_u16_int(z)
+            z_payload = _u16i(z)
         else:
-            z_payload = to_base64_f32(z)
+            z_payload = memoryview(_q_f32(z)) if binary else to_base64_f32(z)
 
     # size/opacity encoding channel (valueB); both share one channel.
     w_src = size_values if size_values is not None else opacity_values
@@ -367,7 +416,7 @@ def build_payload(
         wv = np.asarray(w_src, dtype="float64")
         lo, hi = np.nanmin(wv), np.nanmax(wv)
         w_unit = np.full_like(wv, 0.5) if hi == lo else (wv - lo) / (hi - lo)
-        w_payload = to_base64_u16_unit(w_unit)
+        w_payload = _u16u(w_unit)
 
     # extra hover fields (tooltipBy): numeric -> raw float; categorical -> codes+levels
     tooltip_data = None
@@ -398,8 +447,9 @@ def build_payload(
     margins = {"top": 20, "right": 20, "bottom": 40, "left": 50}
 
     return {
-        "x": to_base64_u16(x_norm),
-        "y": to_base64_u16(y_norm),
+        "binary": binary,
+        "x": _u16(x_norm),
+        "y": _u16(y_norm),
         "w": w_payload,
         "sizeBy": size_values is not None,
         "opacityBy": opacity_values is not None,
