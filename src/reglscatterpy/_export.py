@@ -216,8 +216,49 @@ __FRAGMENT__
 """
 
 
+def _grid_page(children, layout, title):
+    """A self-contained HTML page laying out compose() panels in a CSS grid.
+
+    Each panel is its own self-contained ``<iframe srcdoc>`` (so the file opens
+    with no kernel); the panels are NOT camera/lasso-linked in the saved file
+    (linking needs a live kernel — iframes are isolated).
+    """
+    import re
+
+    cols = 2
+    gtc = getattr(layout, "grid_template_columns", "") or ""
+    m = re.search(r"repeat\((\d+)", gtc)
+    if m:
+        cols = int(m.group(1))
+    elif gtc:
+        cols = max(1, len(gtc.split()))
+    panels = "\n".join(
+        iframe_srcdoc(c) for c in children if getattr(c, "_spec", None)
+    )
+    body = (
+        f'<div style="display:grid; grid-template-columns:repeat({cols},1fr); '
+        f'gap:8px; align-items:start;">{panels}</div>'
+    )
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{_html.escape(str(title))}</title>"
+        "<style>html,body{margin:0;padding:8px;background:#ffffff;}</style></head>"
+        f"<body>{body}</body></html>"
+    )
+
+
 def save_html(widget, path, title="reglscatterpy plot"):
-    """Write one plot to a standalone, offline HTML file (like ``saveWidget``)."""
+    """Write a plot (or a compose() grid) to a standalone, offline HTML file
+    (like R's ``saveWidget``)."""
+    out = pathlib.Path(path)
+    children = getattr(widget, "children", None)
+    if children is not None and not getattr(widget, "_spec", None):
+        # a compose() GridBox -> grid of self-contained panels
+        page = _grid_page(children, getattr(widget, "layout", None), title)
+        out.write_text(page, encoding="utf-8")
+        return str(out)
+
     spec = dict(getattr(widget, "_spec", {}) or {})
     page = (
         _PAGE.replace("__TITLE__", _html.escape(str(title)))
@@ -225,7 +266,6 @@ def save_html(widget, path, title="reglscatterpy plot"):
         .replace("__LOADER__", _LOADER_JS + _bundle_call())
         .replace("__FRAGMENT__", _fragment(widget))
     )
-    out = pathlib.Path(path)
     out.write_text(page, encoding="utf-8")
     return str(out)
 

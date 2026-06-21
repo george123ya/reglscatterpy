@@ -65,9 +65,9 @@ def _maybe_save(obj, save):
 
     ext = pathlib.Path(str(save)).suffix.lower()
     if ext in (".html", ".htm"):
-        if not hasattr(obj, "to_html"):
-            raise ValueError("save= to .html is for a single plot, not a grid.")
-        obj.to_html(save)
+        from ._export import save_html      # handles single plots AND compose grids
+
+        save_html(obj, save)
     else:
         raise ValueError(
             f"save={save!r}: only '.html' is supported programmatically right now "

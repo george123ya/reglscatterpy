@@ -54,6 +54,26 @@ def test_save_html_embeds_the_plot_data(tmp_path):
     assert state["_spec"]["n_points"] == 120
 
 
+def test_save_compose_grid(tmp_path):
+    pytest.importorskip("anywidget")
+    pytest.importorskip("ipywidgets")
+    a = _widget(); b = _widget()
+    # _widget() is static; compose needs live widgets -> rebuild interactive
+    a = rs.scatterplot(
+        pd.DataFrame({"x": [0.0, 1, 2], "y": [2.0, 1, 0], "c": ["a", "b", "a"]}),
+        x="x", y="y", color="c", interactive=True,
+    )
+    b = rs.scatterplot(
+        pd.DataFrame({"x": [0.0, 1, 2], "y": [2.0, 1, 0], "c": ["a", "b", "a"]}),
+        x="x", y="y", color="c", interactive=True,
+    )
+    g = rs.compose([a, b])
+    out = tmp_path / "grid.html"
+    assert rs.save_html(g, str(out)) == str(out)
+    html = out.read_text(encoding="utf-8")
+    assert html.count("<iframe") == 2 and "display:grid" in html
+
+
 def test_save_html_returns_path(tmp_path):
     w = _widget()
     out = tmp_path / "p.html"
