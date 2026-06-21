@@ -182,6 +182,8 @@ def _build_color_payload(
     vmin,
     vmax,
     center_zero,
+    na_color="lightgray",
+    groups=None,
 ):
     options: dict = {}
     legend: dict = {}
@@ -212,6 +214,13 @@ def _build_color_payload(
         hex_cols = _resolve_categorical_palette(
             [str(lv) for lv in levels], custom_colors, custom_palette, categorical_palette
         )
+        # na_color for the "NA" level; `groups` greys out every level not listed
+        # (scanpy semantics) so the chosen populations stand out.
+        keep = None if groups is None else {str(g) for g in groups}
+        for i, lv in enumerate(levels):
+            slv = str(lv)
+            if slv == "NA" or (keep is not None and slv not in keep):
+                hex_cols[i] = na_color
         z = cat.cat.codes.to_numpy().astype("int64")  # 0-based, matches as.integer(f)-1
         counts = cat.value_counts().reindex(levels).fillna(0).astype("int64")
         options = {"colorBy": "valueA", "pointColor": hex_cols}
@@ -284,6 +293,8 @@ def build_payload(
     vmin=None,
     vmax=None,
     center_zero=False,
+    na_color="lightgray",
+    groups=None,
     xrange=None,
     yrange=None,
     range_padding=0.15,
@@ -330,7 +341,7 @@ def build_payload(
     color_payload = _build_color_payload(
         data.color, color_var_name, legend_title, point_color,
         categorical_palette, continuous_palette, custom_palette, custom_colors,
-        vmin, vmax, center_zero,
+        vmin, vmax, center_zero, na_color, groups,
     )
     options = color_payload["options"]
     options["size"] = point_size

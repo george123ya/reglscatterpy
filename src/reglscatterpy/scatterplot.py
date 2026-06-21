@@ -152,6 +152,8 @@ def scatterplot(
     components: Any = _UNSET,       # 1-based embedding dims, e.g. (1, 2); alias of dims
     ncols: Optional[int] = None,    # grid columns when color is a list
     save: Optional[str] = None,     # write to a file (.html now; see docs)
+    na_color: str = "lightgray",    # colour for NaN / un-selected categories
+    groups: Any = None,             # show only these categories; grey the rest
     # --- original names (still supported as aliases) ------------------------
     basis: Optional[Union[str, int]] = None,
     x: Optional[Union[str, int]] = None,
@@ -386,6 +388,7 @@ def scatterplot(
         categorical_palette=categorical_palette, continuous_palette=continuous_palette,
         custom_palette=custom_palette, custom_colors=custom_colors,
         vmin=vmin, vmax=vmax, center_zero=center_zero,
+        na_color=na_color, groups=groups,
         xrange=xrange, yrange=yrange, range_padding=range_padding,
         xlab=xlab, ylab=ylab, title=title, legend_title=legend_title,
         show_axes=show_axes, show_tooltip=show_tooltip,

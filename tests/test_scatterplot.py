@@ -103,6 +103,16 @@ def test_size_by_obs_column_still_works(adata):
     assert w._spec["sizeBy"] is True
 
 
+# --- na_color + groups ----------------------------------------------------- #
+def test_groups_greys_unlisted_categories(adata):
+    w = rs.scatterplot(adata, basis="umap", color="celltype",
+                       groups=["T"], na_color="#eeeeee", show=False)
+    leg = w._spec["legend"]
+    cols = dict(zip(leg["names"], leg["colors"]))
+    assert cols["T"] != "#eeeeee"                 # kept its palette colour
+    assert cols["B"] == "#eeeeee" and cols["NK"] == "#eeeeee"   # greyed out
+
+
 # --- use_raw (scanpy default: gene from .raw when present) ----------------- #
 def test_use_raw_default_reads_raw_not_scaled_X():
     ad = pytest.importorskip("anndata")
