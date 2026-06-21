@@ -76,7 +76,7 @@ def _maybe_save(obj, save):
         )
 
 
-def _resolve_numeric(spec, data, layer=None, param="size_by"):
+def _resolve_numeric(spec, data, layer=None, param="size_by", use_raw=None):
     """Resolve a size/opacity encoding to a numeric array: a column name (in a
     DataFrame or AnnData ``.obs``), a ``var_names`` feature, or a raw vector.
     Returns None if not set."""
@@ -92,12 +92,12 @@ def _resolve_numeric(spec, data, layer=None, param="size_by"):
         # error with the actual parameter name)
         try:
             if _is_anndata(data):
-                vec, _ = _resolve_anndata_vec(data, spec, layer)
+                vec, _ = _resolve_anndata_vec(data, spec, layer, use_raw)
                 return np.asarray(vec, dtype="float64")
             if _is_mudata(data) and ":" in spec:
                 mod, key = spec.split(":", 1)
                 if mod in data.mod:
-                    vec, _ = _resolve_anndata_vec(data.mod[mod], key, layer)
+                    vec, _ = _resolve_anndata_vec(data.mod[mod], key, layer, use_raw)
                     return np.asarray(vec, dtype="float64")
         except KeyError:
             pass
@@ -159,6 +159,7 @@ def scatterplot(
     color_by: ColorSpec = None,
     group_by: ColorSpec = None,
     layer: Optional[str] = None,
+    use_raw: Optional[bool] = None,
     dims: Optional[tuple] = None,
     table: Optional[str] = None,
     point_size: Optional[float] = None,
@@ -302,7 +303,7 @@ def scatterplot(
         panels = [
             scatterplot(
                 data, basis=basis, x=x, y=y, color_by=name, group_by=group_by,
-                layer=layer, dims=dims, table=table, point_size=point_size,
+                layer=layer, use_raw=use_raw, dims=dims, table=table, point_size=point_size,
                 opacity=opacity, point_color=point_color, size_by=size_by,
                 opacity_by=opacity_by, tooltip_by=tooltip_by,
                 pixel_ratio=pixel_ratio, categorical_palette=categorical_palette,
@@ -340,7 +341,7 @@ def scatterplot(
 
     pd_data: PlotData = extract(
         data, x=eff_x, y=y, color_by=color_by, group_by=group_by,
-        layer=layer, dims=dims, table=table,
+        layer=layer, use_raw=use_raw, dims=dims, table=table,
     )
 
     # adaptive defaults, matching the R heuristics
@@ -367,8 +368,8 @@ def scatterplot(
         raise _not_found("continuous_palette", continuous_palette,
                          list(CONTINUOUS), searched="built-in continuous palettes")
 
-    size_values = _resolve_numeric(size_by, data, layer, param="size_by")
-    opacity_values = _resolve_numeric(opacity_by, data, layer, param="opacity_by")
+    size_values = _resolve_numeric(size_by, data, layer, "size_by", use_raw)
+    opacity_values = _resolve_numeric(opacity_by, data, layer, "opacity_by", use_raw)
     tooltip_cols = _resolve_cols(tooltip_by, data)
     for pname, vec in (("size_by", size_values), ("opacity_by", opacity_values)):
         if vec is not None and len(vec) != n:

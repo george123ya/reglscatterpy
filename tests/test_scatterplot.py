@@ -103,6 +103,27 @@ def test_size_by_obs_column_still_works(adata):
     assert w._spec["sizeBy"] is True
 
 
+# --- use_raw (scanpy default: gene from .raw when present) ----------------- #
+def test_use_raw_default_reads_raw_not_scaled_X():
+    ad = pytest.importorskip("anndata")
+    rng = np.random.RandomState(7)
+    n, g = 60, 6
+    names = [f"Gene{i}" for i in range(g)]
+    lognorm = rng.gamma(2, 1.0, (n, g))                 # .raw: 0..~6
+    adata = ad.AnnData(
+        X=(lognorm - lognorm.mean(0)) / (lognorm.std(0) + 1e-9),  # .X: z-scored (neg)
+        obs=pd.DataFrame(index=[f"c{i}" for i in range(n)]),
+        var=pd.DataFrame(index=names),
+    )
+    adata.raw = ad.AnnData(X=lognorm, var=pd.DataFrame(index=names))
+    adata.obsm["X_umap"] = rng.randn(n, 2)
+
+    raw_plot = rs.scatterplot(adata, basis="umap", color="Gene0", show=False)   # default
+    assert raw_plot._spec["legend"]["minVal"] >= 0          # log-normalised, non-negative
+    x_plot = rs.scatterplot(adata, basis="umap", color="Gene0", use_raw=False, show=False)
+    assert x_plot._spec["legend"]["minVal"] < 0             # scaled .X has negatives
+
+
 # --- scanpy-aligned argument names ----------------------------------------- #
 def test_color_alias_matches_color_by(adata):
     a = rs.scatterplot(adata, basis="umap", color="celltype", show=False)

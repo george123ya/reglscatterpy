@@ -114,8 +114,15 @@ def _resolve_basis(adata: Any, x: Optional[str]) -> str:
     raise _not_found("basis/x", x, keys, searched=".obsm (also tried 'X_' prefix)")
 
 
-def _resolve_anndata_vec(adata: Any, key: ColorSpec, layer: Optional[str]):
-    """Return (vector, name) for a color/group spec against an AnnData."""
+def _resolve_anndata_vec(adata: Any, key: ColorSpec, layer: Optional[str],
+                         use_raw: Optional[bool] = None):
+    """Return (vector, name) for a color/group spec against an AnnData.
+
+    Gene expression is read like scanpy's ``sc.pl.umap``: ``use_raw`` defaults to
+    ``True`` when ``.raw`` is present and no ``layer`` is given, so a gene shows
+    the log-normalised values in ``.raw`` (e.g. 0–4) rather than the (often
+    z-scored) ``.X`` (e.g. −2…2). Pass ``use_raw=False`` to force ``.X``.
+    """
     if key is None:
         return None, None
     if not isinstance(key, str):
@@ -124,25 +131,33 @@ def _resolve_anndata_vec(adata: Any, key: ColorSpec, layer: Optional[str]):
     if key in adata.obs.columns:
         return adata.obs[key].to_numpy(), key
 
-    var_names = adata.raw.var_names if (layer == "raw" and adata.raw) else adata.var_names
-    if key in var_names:
+    raw = getattr(adata, "raw", None)
+    if use_raw is None:                       # scanpy's default rule
+        use_raw = layer is None and raw is not None
+
+    # gene from .raw (scanpy's default source for log-normalised expression)
+    if (use_raw or layer == "raw") and raw is not None and key in raw.var_names:
+        return _densify(raw[:, key].X), key
+
+    # gene from .X or a named layer
+    if key in adata.var_names:
         sub = adata[:, key]
-        if layer == "raw" and adata.raw is not None:
-            mat = adata.raw[:, key].X
-        elif layer is not None:
+        if layer not in (None, "raw"):
             mat = sub.layers[layer]
-        elif sub.X is not None:          # default: the main matrix
+        elif sub.X is not None:               # the main matrix
             mat = sub.X
-        elif len(adata.layers) > 0:       # X is absent -> fall back to a layer
+        elif len(adata.layers) > 0:           # X absent -> fall back to a layer
             mat = sub.layers[next(iter(adata.layers))]
         else:
-            mat = sub.X                   # truly nothing -> let it error clearly
+            mat = sub.X                        # truly nothing -> let it error
         return _densify(mat), key
 
+    avail = list(adata.obs.columns) + list(adata.var_names)
+    if raw is not None:
+        avail += list(raw.var_names)
     raise _not_found(
-        "color_by/group_by", key,
-        list(adata.obs.columns) + list(var_names),
-        searched=".obs columns and .var_names",
+        "color_by/group_by", key, avail,
+        searched=".obs columns, .var_names and .raw",
     )
 
 
@@ -150,7 +165,7 @@ def _resolve_anndata_vec(adata: Any, key: ColorSpec, layer: Optional[str]):
 # per-type extractors
 # --------------------------------------------------------------------------- #
 def _from_anndata(
-    adata, x, y, color_by, group_by, layer, dims
+    adata, x, y, color_by, group_by, layer, dims, use_raw=None
 ) -> PlotData:
     basis = _resolve_basis(adata, x)
     coords = np.asarray(adata.obsm[basis])
@@ -160,8 +175,8 @@ def _from_anndata(
             f"Embedding {basis!r} has {coords.shape[1]} dims; "
             f"cannot take dims {(d0, d1)}."
         )
-    color, color_name = _resolve_anndata_vec(adata, color_by, layer)
-    group, group_name = _resolve_anndata_vec(adata, group_by, layer)
+    color, color_name = _resolve_anndata_vec(adata, color_by, layer, use_raw)
+    group, group_name = _resolve_anndata_vec(adata, group_by, layer, use_raw)
     label = basis[2:] if basis.startswith("X_") else basis
     return PlotData(
         x=coords[:, d0],
@@ -175,14 +190,14 @@ def _from_anndata(
     )
 
 
-def _from_mudata(mdata, x, y, color_by, group_by, layer, dims) -> PlotData:
+def _from_mudata(mdata, x, y, color_by, group_by, layer, dims, use_raw=None) -> PlotData:
     # Global embeddings live on the MuData object itself; per-modality features
     # are addressed as "modality:feature" (e.g. "rna:CD3D").
     def split_mod(spec):
         if isinstance(spec, str) and ":" in spec:
             mod, key = spec.split(":", 1)
             if mod in mdata.mod:
-                return _resolve_anndata_vec(mdata.mod[mod], key, layer)
+                return _resolve_anndata_vec(mdata.mod[mod], key, layer, use_raw)
         return None
 
     # Embedding: support a global MuData embedding ("X_umap") or a per-modality
@@ -223,7 +238,7 @@ def _from_mudata(mdata, x, y, color_by, group_by, layer, dims) -> PlotData:
 
 
 def _from_spatialdata(
-    sdata, x, y, color_by, group_by, layer, dims, table
+    sdata, x, y, color_by, group_by, layer, dims, table, use_raw=None
 ) -> PlotData:
     tables = list(sdata.tables.keys())
     if not tables:
@@ -234,7 +249,7 @@ def _from_spatialdata(
     adata = sdata.tables[tbl]
     # x defaults to the spatial coordinates for a SpatialData input.
     return _from_anndata(adata, x or "spatial", y, color_by, group_by,
-                         layer, dims)
+                         layer, dims, use_raw)
 
 
 def _from_dataframe(df, x, y, color_by, group_by) -> PlotData:
@@ -285,15 +300,16 @@ def extract(
     layer: Optional[str] = None,
     dims: Optional[tuple] = None,
     table: Optional[str] = None,
+    use_raw: Optional[bool] = None,
 ) -> PlotData:
     """Normalise any supported input into :class:`PlotData`."""
     if _is_anndata(data):
-        result = _from_anndata(data, x, y, color_by, group_by, layer, dims)
+        result = _from_anndata(data, x, y, color_by, group_by, layer, dims, use_raw)
     elif _is_mudata(data):
-        result = _from_mudata(data, x, y, color_by, group_by, layer, dims)
+        result = _from_mudata(data, x, y, color_by, group_by, layer, dims, use_raw)
     elif _is_spatialdata(data):
         result = _from_spatialdata(
-            data, x, y, color_by, group_by, layer, dims, table
+            data, x, y, color_by, group_by, layer, dims, table, use_raw
         )
     elif type(data).__name__ == "DataFrame":
         result = _from_dataframe(data, x, y, color_by, group_by)
