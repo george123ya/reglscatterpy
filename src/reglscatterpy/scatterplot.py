@@ -164,7 +164,7 @@ def scatterplot(
     filter_by: Any = None,
     point_labels: Optional[Sequence] = None,
     plot_id: Optional[str] = None,
-    width: Optional[int] = None,
+    width: Optional[int] = 700,
     height: int = 500,
     backend: str = "regl",
     interactive: bool = False,
@@ -258,7 +258,7 @@ def scatterplot(
                 legend_font_size=legend_font_size, auto_fit=auto_fit,
                 range_padding=range_padding, xrange=xrange, yrange=yrange,
                 filter_by=filter_by, point_labels=point_labels, plot_id=None,
-                width=width, height=height, backend=backend,
+                width=None, height=height, backend=backend,  # responsive in the grid
                 interactive=True, show=False,  # linked sync needs live widgets
                 **backend_kwargs,
             )

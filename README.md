@@ -52,8 +52,8 @@ df = pd.DataFrame({"x": np.random.rand(10_000), "y": np.random.rand(10_000),
 rs.scatterplot(df, x="x", y="y", color_by="ct")
 ```
 
-Plots fill the notebook cell width by default; pass `width=` (pixels) for a
-fixed size.
+Plots are **700 px wide by default** (not the full cell width). Pass `width=`
+(pixels) for a different size, or `width=None` to fill the cell.
 
 ## Gallery
 
