@@ -1045,6 +1045,12 @@ def scatterplot(
         point_size = 1 if n > 500_000 else 5 if n < 5_000 else 4 if n < 50_000 else 3
     if opacity is None:
         opacity = 1.0 if n > 500_000 else 0.8
+    if add_outline:
+        # The outline ring is a dark disc drawn BEHIND each point; a semi-transparent
+        # body lets it bleed through and muddies/darkens the fill (the gap pass uses
+        # the canvas background, which is transparent here, so it can't mask it).
+        # Render bodies opaque so the colour stays true and only the ring shows.
+        opacity = 1.0
 
     if backend == "jscatter":
         return _scatterplot_jscatter(
