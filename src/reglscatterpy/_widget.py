@@ -76,11 +76,11 @@ def _make_classes():
             if perm is not None:
                 inv = getattr(self, "_inv_draw_order", None)
                 if inv is None:
-                    import numpy as np
-                    inv = np.empty(len(perm), dtype="int64")
-                    inv[np.asarray(perm)] = np.arange(len(perm))
+                    # original data index -> rendered position; a subsample omits
+                    # most originals, so use a dict and drop the not-rendered ones.
+                    inv = {int(o): p for p, o in enumerate(perm)}
                     self._inv_draw_order = inv
-                idx = [int(inv[d]) for d in idx if 0 <= d < len(inv)]
+                idx = [inv[d] for d in idx if d in inv]
             self._selection = idx
 
         def subset(self, selection=None):

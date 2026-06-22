@@ -124,6 +124,23 @@ def test_sort_order_off_keeps_natural_order(adata):
     assert w._draw_order is None                   # no reorder -> identity
 
 
+# --- max_points (downsample huge data) ------------------------------------- #
+def test_max_points_subsamples_and_selection_maps(adata):
+    w = rs.scatterplot(adata, basis="umap", color="celltype", max_points=20,
+                       interactive=True, show=False)
+    assert w._spec["n_points"] == 20                 # rendered a subsample
+    assert len(w._draw_order) == 20
+    target = [int(w._draw_order[5])]                  # an original-data index that's rendered
+    w.selection = target
+    assert w.selection == target                      # round-trips in ORIGINAL coords
+
+
+def test_max_points_noop_when_under_threshold(adata):
+    w = rs.scatterplot(adata, basis="umap", color="celltype",
+                       max_points=10_000, show=False)
+    assert w._spec["n_points"] == adata.n_obs         # no subsample
+
+
 # --- na_color + groups ----------------------------------------------------- #
 def test_groups_greys_unlisted_categories(adata):
     w = rs.scatterplot(adata, basis="umap", color="celltype",

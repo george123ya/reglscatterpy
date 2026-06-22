@@ -76,18 +76,32 @@ def _maybe_save(obj, save):
         )
 
 
-def _compute_draw_order(color, n, sort_order, random_state):
-    """Permutation of point indices controlling draw depth (drawn later = on
-    top), or None for the natural order. ``sort_order`` draws higher *continuous*
-    values on top (scanpy's default); ``random_state`` shuffles with a seed so
-    no category is systematically hidden by overplotting (reproducibly)."""
+def _render_index(color, n, sort_order, random_state, max_points):
+    """Indices (into the original n points) to actually render, in draw order.
+
+    When ``max_points`` is set and ``n`` is larger, **subsample** to that many
+    points so huge datasets stay interactive (every pan re-renders only the
+    subset, and points can be round again instead of perf-mode squares). Then
+    apply z-depth ordering: ``random_state`` shuffles (seeded), else
+    ``sort_order`` draws higher *continuous* values on top (scanpy default).
+    Returns ``None`` to render all points in natural order. Indices are in
+    ORIGINAL coordinates, so ``w.selection`` still maps to rows of the source.
+    """
+    idx = None
+    if max_points is not None and n > int(max_points):
+        rng = np.random.RandomState(0 if random_state is None else int(random_state))
+        idx = np.sort(rng.choice(n, int(max_points), replace=False))
+    m = n if idx is None else int(idx.shape[0])
+    arr = np.asarray(color) if color is not None else None
+    order = None
     if random_state is not None:
-        return np.random.RandomState(int(random_state)).permutation(n)
-    if sort_order and color is not None:
-        arr = np.asarray(color)
-        if np.issubdtype(arr.dtype, np.number):
-            return np.argsort(arr, kind="stable")   # ascending -> high on top
-    return None
+        order = np.random.RandomState(int(random_state)).permutation(m)
+    elif sort_order and arr is not None and np.issubdtype(arr.dtype, np.number):
+        sub = arr if idx is None else arr[idx]
+        order = np.argsort(sub, kind="stable")   # ascending -> high on top
+    if order is not None:
+        idx = order if idx is None else idx[order]
+    return idx
 
 
 def _resolve_numeric(spec, data, layer=None, param="size_by", use_raw=None):
@@ -170,6 +184,7 @@ def scatterplot(
     groups: Any = None,             # show only these categories; grey the rest
     sort_order: bool = True,        # draw higher continuous values on top (scanpy)
     random_state: Optional[int] = None,  # seed -> random draw order (reduce overplotting)
+    max_points: Optional[int] = None,    # subsample to this many for smooth huge-data exploration
     # --- original names (still supported as aliases) ------------------------
     basis: Optional[Union[str, int]] = None,
     x: Optional[Union[str, int]] = None,
@@ -336,7 +351,7 @@ def scatterplot(
                 continuous_palette=continuous_palette, custom_palette=custom_palette,
                 custom_colors=custom_colors, vmin=vmin, vmax=vmax,
                 center_zero=center_zero, na_color=na_color, groups=groups,
-                sort_order=sort_order, random_state=random_state,
+                sort_order=sort_order, random_state=random_state, max_points=max_points,
                 title=(title or name), xlab=xlab, ylab=ylab,
                 legend_title=legend_title, show_axes=show_axes,
                 show_tooltip=show_tooltip, background_color=background_color,
@@ -405,10 +420,11 @@ def scatterplot(
                 f"{pname} has length {len(vec)} but the data has {n} points."
             )
 
-    # Draw order (z-depth). Reorder ALL per-point arrays consistently; the
-    # permutation is stored on the widget and w.selection is translated back to
-    # data indices at the Python boundary, so the JS never needs to know.
-    draw_order = _compute_draw_order(pd_data.color, n, sort_order, random_state)
+    # Render index = which points to draw (subsample for huge data) + draw order
+    # (z-depth). Subset/reorder ALL per-point arrays consistently; the index is
+    # stored on the widget and w.selection is translated back to ORIGINAL data
+    # indices at the Python boundary, so the JS never needs to know.
+    draw_order = _render_index(pd_data.color, n, sort_order, random_state, max_points)
     if draw_order is not None:
         import dataclasses
 
