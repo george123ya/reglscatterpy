@@ -78,7 +78,8 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
             and (x1 - x0) >= 0.8 * (xr[1] - xr[0])
             and (y1 - y0) >= 0.8 * (yr[1] - yr[0])):
         if vp.get("showing_overview"):
-            return                              # already at overview -> no redundant redraw
+            widget.send({"type": "vp_noop", "seq": seq})   # already at overview; clear loader
+            return
         vp["showing_overview"] = True
         vp["last_fetch"] = None                 # so the next zoom-in re-fetches detail
         sel = vp.get("sel")
@@ -125,6 +126,7 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
         px0, py0, px1, py1, lspan = lf
         if (x0 >= px0 and x1 <= px1 and y0 >= py0 and y1 <= py1
                 and _vspan >= 0.85 * lspan):
+            widget.send({"type": "vp_noop", "seq": seq})   # covered; clear the loader
             return
     dx, dy = (x1 - x0) * pad, (y1 - y0) * pad      # overscan margin
     x0, x1, y0, y1 = x0 - dx, x1 + dx, y0 - dy, y1 + dy
@@ -138,6 +140,7 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
         m = (fx >= x0) & (fx <= x1) & (fy >= y0) & (fy <= y1)
         in_idx = np.where(m)[0]
     if in_idx.size == 0:
+        widget.send({"type": "vp_noop", "seq": seq})       # nothing in view; clear loader
         return
     data = vp["data"]
     sub = data[in_idx] if hasattr(data, "obs") else data.iloc[in_idx]
