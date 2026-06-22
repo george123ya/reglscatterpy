@@ -373,6 +373,7 @@ def scatterplot(
     fast: bool = False,             # experimental: binary transfer (implies interactive)
     progressive: bool = False,      # experimental: density-sketch overview + full detail as you zoom in
     detail_on_zoom: bool = False,   # internal: emit viewport messages so the kernel re-renders in-view cells
+    performance_mode: Optional[bool] = None,  # squares+no-blend (faster) vs round circles; None=auto (n>500k), forced on for progressive unless set False
     show: bool = True,
     **backend_kwargs: Any,
 ):
@@ -676,7 +677,11 @@ def scatterplot(
     )
     if detail_on_zoom:
         spec["detailOnZoom"] = True   # client emits viewport msgs -> kernel re-renders in-view cells
-        spec["performanceMode"] = True  # squares + no alpha-blend: much cheaper draws on every refresh
+        # squares + no alpha-blend are much cheaper per draw; default on for the
+        # zoom loop, but honour an explicit performance_mode=False (round circles).
+        spec["performanceMode"] = True if performance_mode is None else bool(performance_mode)
+    elif performance_mode is not None:
+        spec["performanceMode"] = bool(performance_mode)
 
     # Be honest about subsampling: caption the plot ("X of Y shown") and, when the
     # downsample was automatic (not user-requested), warn — so a subsampled plot is
