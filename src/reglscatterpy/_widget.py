@@ -99,6 +99,38 @@ def _make_classes():
             else:
                 self._selection = positions
 
+        def highlight(self, indices, color=None):
+            """Persistently mark points with a crisp ring + size bump (the engine's
+            selection look) — but this is **not** the selection, so it survives a
+            double-click and a new lasso. ``indices`` are original data indices;
+            ``color`` sets the ring colour (a hex / CSS colour). Pass ``[]`` / ``None``
+            to clear. Live (``interactive=True``) only — needs the kernel link.
+
+            Note: with ``progressive=True`` the highlight marks the currently-shown
+            cells; it doesn't yet follow new cells streamed in on zoom.
+            """
+            idx = [int(i) for i in (indices or [])]
+            perm = getattr(self, "_draw_order", None)
+            if perm is not None:
+                inv = getattr(self, "_inv_draw_order", None)
+                if inv is None:
+                    inv = {int(o): p for p, o in enumerate(perm)}
+                    self._inv_draw_order = inv
+                positions = [inv[d] for d in idx if d in inv]
+            else:
+                positions = idx
+            self._highlight = idx
+            send = getattr(self, "send", None)
+            if callable(send):
+                msg = {"type": "hl", "points": positions}
+                if color is not None:
+                    msg["color"] = color
+                try:
+                    send(msg)
+                except Exception:
+                    pass
+            return self
+
         def subset(self, selection=None):
             """The source object subset to the selected cells (``adata[w.selection]``)."""
             sel = self.selection if selection is None else [int(i) for i in selection]
