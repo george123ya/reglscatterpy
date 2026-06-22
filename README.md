@@ -255,6 +255,34 @@ w                                  # lasso a region
 w.composition("leiden")            # -> count + fraction per cluster in the selection
 ```
 
+## Outlines & highlighting
+
+Two ways to make points stand out, both using a crisp antialiased ring:
+
+**`add_outline=True`** — a scanpy-style outline on **every** point (whole-plot
+aesthetic). The body keeps its colour; an outer ring + background gap go behind it:
+
+```python
+rs.scatterplot(adata, basis="umap", color_by="cluster", add_outline=True)
+rs.scatterplot(adata, basis="umap", color_by="cluster", add_outline=True,
+               outline_color=("black", "white"), outline_width=(0.3, 0.05))
+```
+
+> `add_outline` is for small/medium plots — it auto-skips (with a warning) above
+> ~150k drawn points, where the ring is invisible (~1px) anyway. For huge data,
+> mark a subset with `highlight` instead.
+
+**`w.highlight([...])`** — persistently mark a **chosen subset** of cells (live
+widget). Unlike a lasso selection, it **survives double-click and new lassoes**:
+
+```python
+w = rs.scatterplot(adata, basis="umap", color_by="cluster", interactive=True)
+w.highlight([12, 87, 134], color="red")   # ring + size bump on these cells
+w.highlight([])                            # clear
+```
+
+Indices are original data indices (e.g. `np.where(adata.obs["cluster"]=="T")[0]`).
+
 ## Linked grid
 
 Colour one embedding by **several genes / obs columns at once** — pass a list to

@@ -82,6 +82,15 @@ md("## 5. `na_color` & `groups`\n"
    "`groups=[...]` keeps only those categories coloured; the rest grey out to `na_color`.")
 code("rs.scatterplot(adata, basis='umap', color='cluster', groups=['C0', 'C3'], na_color='#dddddd')")
 
+md("## 5b. Outlines & highlighting\n"
+   "`add_outline=True` draws a scanpy-style ring on **every** point (small/medium plots; "
+   "auto-skips on huge ones). `outline_color=(ring, gap)`, `outline_width=(ring, gap)`.")
+code("rs.scatterplot(adata, basis='umap', color='cluster', add_outline=True, size=8)")
+code("rs.scatterplot(adata, basis='umap', color='cluster', add_outline=True,\n"
+     "               outline_color=('black', 'white'), outline_width=(0.3, 0.05), size=8)")
+md("To mark a **subset** instead (persistent — survives double-click / new lasso), use "
+   "the live widget's `w.highlight([...])` (shown in the interactive section below).")
+
 md("## 6. Other components / embeddings\n"
    "`components=(i, j)` is 1-based (scanpy). Plot PC2 vs PC3:")
 code("rs.scatterplot(adata, basis='pca', color='cluster', components=(2, 3))")
@@ -161,6 +170,13 @@ code("w.diff_expression(n=5)    # top markers of the selection vs the rest")
 code("w.composition('cluster')  # what clusters the selection is made of")
 code("w.annotate('my_label', 'group A')   # writes adata.obs['my_label'] for the selected cells\n"
      "rs.scatterplot(adata, basis='umap', color='my_label')")
+
+md("### Persistently highlight chosen cells\n"
+   "`w.highlight([...])` marks cells with a crisp ring + size bump. Unlike a selection it "
+   "**survives double-click and new lassoes** (it's a separate layer). Pass `color=` for the ring.")
+code("import numpy as np\n"
+     "w.highlight(list(np.where(adata.obs['cluster'] == 'C0')[0]), color='red')")
+code("w.highlight([])   # clear the highlight")
 
 md("## 12. Linked grid (`compose`)\n"
    "Pass plots to `rs.compose(...)` — pan/zoom and lasso stay in sync across panels. "
