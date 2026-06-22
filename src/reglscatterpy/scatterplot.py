@@ -139,6 +139,13 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
     if in_idx.size == 0:
         widget.send({"type": "vp_noop", "seq": seq})       # nothing in view; clear loader
         return
+    # Dense region: a tight zoom into a packed cluster can still hold millions of
+    # cells. Pre-cap the candidates (cheap random) BEFORE building so subset+density
+    # -sketch stay fast; the density-sketch below still refines to the budget.
+    budget = int(vp["budget"])
+    if in_idx.size > budget * 3:
+        _r = np.random.RandomState(0)
+        in_idx = np.sort(_r.choice(in_idx, budget * 3, replace=False))
     data = vp["data"]
     sub = data[in_idx] if hasattr(data, "obs") else data.iloc[in_idx]
     extra = {"max_points": vp["budget"]}

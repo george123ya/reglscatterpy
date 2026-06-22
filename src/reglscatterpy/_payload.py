@@ -451,7 +451,15 @@ def build_payload(
     if filter_by is not None:
         fb = pd.DataFrame(filter_by)
         for col in fb.columns:
-            filter_payload[str(col)] = to_base64_f32(fb[col].to_numpy().astype("float64"))
+            s = fb[col]
+            if isinstance(s.dtype, pd.CategoricalDtype) or not np.issubdtype(
+                    np.asarray(s).dtype, np.number):
+                raise ValueError(
+                    f"filter_by column {col!r} is not numeric (dtype {s.dtype}). "
+                    "Filter sliders show numeric distributions — pass numeric columns "
+                    "(e.g. n_counts, pct_mito); use groups=/color= for categories."
+                )
+            filter_payload[str(col)] = to_base64_f32(s.to_numpy().astype("float64"))
 
     margins = {"top": 20, "right": 20, "bottom": 40, "left": 50}
 
