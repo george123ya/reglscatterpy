@@ -83,6 +83,8 @@ def _viewport_payload(widget, bounds, pad=0.6):
     if vp.get("xrange") and vp["xrange"][0] is not None:   # keep the overview domain
         extra["xrange"] = vp["xrange"]
         extra["yrange"] = vp["yrange"]
+    if vp.get("point_size") is not None:                   # keep size constant
+        extra["point_size"] = vp["point_size"]
     w2 = scatterplot(sub, **{**vp["base"], **extra}, **vp["bk"])
     do = w2._draw_order
     orig = in_idx if do is None else in_idx[np.asarray(do)]
@@ -438,7 +440,11 @@ def scatterplot(
                      # keep the overview's data domain so the preserved camera
                      # still maps correctly when we re-render an in-view subset.
                      "xrange": (w._spec.get("x_min"), w._spec.get("x_max")),
-                     "yrange": (w._spec.get("y_min"), w._spec.get("y_max"))}
+                     "yrange": (w._spec.get("y_min"), w._spec.get("y_max")),
+                     # keep point size fixed across refreshes (the auto size grows
+                     # as the in-view subset shrinks, which looked like points
+                     # ballooning on every zoom).
+                     "point_size": (w._spec.get("options") or {}).get("size")}
             w.on_msg(_viewport_handler)
         except Exception:
             pass
