@@ -70,6 +70,18 @@ def _viewport_payload(widget, bounds, pad=0.6):
     if not vp:
         return
     x0, y0, x1, y1 = (float(b) for b in bounds)
+    # Zoomed back out to ~the full extent? Snap to the cached overview instantly
+    # (no recompute, no transfer) instead of rebuilding the whole-dataset sketch.
+    xr, yr = vp.get("xrange"), vp.get("yrange")
+    if (xr and xr[0] is not None and vp.get("overview_spec") is not None
+            and (x1 - x0) >= 0.9 * (xr[1] - xr[0])
+            and (y1 - y0) >= 0.9 * (yr[1] - yr[0])):
+        if widget._spec is not vp["overview_spec"]:     # already showing it? do nothing
+            widget._inv_draw_order = None
+            widget._draw_order = vp["overview_draw_order"]
+            widget._source = vp["data"]
+            widget._spec = vp["overview_spec"]
+        return
     dx, dy = (x1 - x0) * pad, (y1 - y0) * pad      # overscan margin
     x0, x1, y0, y1 = x0 - dx, x1 + dx, y0 - dy, y1 + dy
     fx, fy = vp["x"], vp["y"]
@@ -444,7 +456,11 @@ def scatterplot(
                      # keep point size fixed across refreshes (the auto size grows
                      # as the in-view subset shrinks, which looked like points
                      # ballooning on every zoom).
-                     "point_size": (w._spec.get("options") or {}).get("size")}
+                     "point_size": (w._spec.get("options") or {}).get("size"),
+                     # cached overview so zooming back out snaps to it instantly
+                     # instead of recomputing the whole-dataset sketch.
+                     "overview_spec": w._spec,
+                     "overview_draw_order": w._draw_order}
             w.on_msg(_viewport_handler)
         except Exception:
             pass
