@@ -506,6 +506,15 @@ def scatterplot(
         max_points = _DEFAULT_MAX_POINTS   # smooth by default; pass max_points=None for all points
     if fast:
         interactive = True   # binary transfer rides the live comm; needs a widget
+    if pixel_ratio is not None and pixel_ratio < 1:
+        import warnings
+        warnings.warn(
+            f"pixel_ratio={pixel_ratio} < 1 downsamples (blurry) and can break "
+            "rendering; clamped to 1. pixel_ratio supersamples for crispness — use "
+            ">= 1 (e.g. 1.5 or 2).",
+            stacklevel=2,
+        )
+        pixel_ratio = 1.0
 
     # --- progressive: subset now (instant), full streamed in the background ---
     if progressive and not _is_name_list(color_by) and backend == "regl":
