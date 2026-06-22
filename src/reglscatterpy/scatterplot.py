@@ -198,10 +198,50 @@ def _grid_query(idx, x0, y0, x1, y1):
     return np.concatenate(parts)
 
 
+def _points_in_polygon(fx, fy, poly):
+    """Boolean mask of points inside the polygon (data coords). matplotlib when
+    available, else a vectorised ray-casting fallback."""
+    poly = np.asarray(poly, "float64")
+    x = np.asarray(fx, "float64"); y = np.asarray(fy, "float64")
+    try:
+        from matplotlib.path import Path
+        return Path(poly).contains_points(np.column_stack([x, y]))
+    except Exception:
+        n = poly.shape[0]
+        inside = np.zeros(x.shape[0], dtype=bool)
+        j = n - 1
+        for i in range(n):
+            xi, yi = poly[i]; xj, yj = poly[j]
+            cond = ((yi > y) != (yj > y)) & (
+                x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi)
+            inside ^= cond
+            j = i
+        return inside
+
+
+def _lasso_payload(widget, polygon):
+    """Full-region lasso: select EVERY cell inside the polygon on the full dataset
+    (not just the rendered subset), then re-highlight whatever's currently in view."""
+    vp = getattr(widget, "_vp", None)
+    if not vp or not polygon or len(polygon) < 3:
+        return
+    mask = _points_in_polygon(vp["x"], vp["y"], polygon)
+    sel = {int(i) for i in np.where(mask)[0]}
+    vp["sel"] = sel                                  # logical selection = all in region
+    widget._source = vp["data"]
+    widget.send({"type": "vp_select",
+                 "select": _sel_positions(sel, widget._draw_order)})
+
+
 def _viewport_handler(widget, content, buffers):
     try:
-        if isinstance(content, dict) and content.get("type") == "viewport":
+        if not isinstance(content, dict):
+            return
+        t = content.get("type")
+        if t == "viewport":
             _viewport_payload(widget, content["bounds"])
+        elif t == "lasso":
+            _lasso_payload(widget, content.get("polygon"))
     except Exception:
         pass
 
