@@ -144,6 +144,7 @@ def _vp_channels(spec):
     return {"type": "vp_update",
             "x": spec.get("x"), "y": spec.get("y"), "z": spec.get("z"),
             "w": spec.get("w"), "group_data": spec.get("group_data"),
+            "tooltip_data": spec.get("tooltip_data"), "filter_data": spec.get("filter_data"),
             "n_points": spec.get("n_points")}
 
 
