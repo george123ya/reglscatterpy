@@ -76,11 +76,15 @@ def _viewport_payload(widget, bounds, pad=0.6):
     if (xr and xr[0] is not None
             and (x1 - x0) >= 0.9 * (xr[1] - xr[0])
             and (y1 - y0) >= 0.9 * (yr[1] - yr[0])):
+        if vp.get("showing_overview"):
+            return                              # already at overview -> no redundant redraw
+        vp["showing_overview"] = True
         widget._inv_draw_order = None
         widget._draw_order = vp["overview_draw_order"]
         widget._source = vp["data"]
-        widget.send(vp["overview_channels"])
+        widget.send({"type": "vp_overview"})    # JS redraws its cached overview buffers
         return
+    vp["showing_overview"] = False
     dx, dy = (x1 - x0) * pad, (y1 - y0) * pad      # overscan margin
     x0, x1, y0, y1 = x0 - dx, x1 + dx, y0 - dy, y1 + dy
     fx, fy = vp["x"], vp["y"]
@@ -474,8 +478,9 @@ def scatterplot(
                      # keep point size + colour scale fixed across refreshes.
                      "point_size": (w._spec.get("options") or {}).get("size"),
                      "vmin": _lg.get("minVal"), "vmax": _lg.get("maxVal"),
-                     # cached overview channels -> instant plot.draw on zoom-out.
-                     "overview_channels": _vp_channels(w._spec),
+                     # the JS caches the overview buffers; zoom-out just asks it to
+                     # redraw them. Track state to skip redundant redraws on pan.
+                     "showing_overview": True,
                      "overview_draw_order": w._draw_order}
             w.on_msg(_viewport_handler)
         except Exception:
