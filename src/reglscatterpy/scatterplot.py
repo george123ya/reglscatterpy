@@ -74,8 +74,8 @@ def _viewport_payload(widget, bounds, pad=0.6):
     # Zoomed back out to ~the full extent? Push the cached overview channels
     # instantly (no recompute, no rebuild) — and via plot.draw, not a re-render.
     if (xr and xr[0] is not None
-            and (x1 - x0) >= 0.9 * (xr[1] - xr[0])
-            and (y1 - y0) >= 0.9 * (yr[1] - yr[0])):
+            and (x1 - x0) >= 0.8 * (xr[1] - xr[0])
+            and (y1 - y0) >= 0.8 * (yr[1] - yr[0])):
         if vp.get("showing_overview"):
             return                              # already at overview -> no redundant redraw
         vp["showing_overview"] = True
@@ -89,12 +89,18 @@ def _viewport_payload(widget, bounds, pad=0.6):
     dx, dy = (x1 - x0) * pad, (y1 - y0) * pad      # overscan margin
     x0, x1, y0, y1 = x0 - dx, x1 + dx, y0 - dy, y1 + dy
     fx, fy = vp["x"], vp["y"]
-    mask = (fx >= x0) & (fx <= x1) & (fy >= y0) & (fy <= y1)
-    in_idx = np.where(mask)[0]
+    cand = _grid_query(vp["grid"], x0, y0, x1, y1) if vp.get("grid") is not None else None
+    if cand is not None:                           # deep zoom: grid candidates + exact filter
+        m = ((fx[cand] >= x0) & (fx[cand] <= x1)
+             & (fy[cand] >= y0) & (fy[cand] <= y1))
+        in_idx = cand[m]
+    else:                                          # wide view / no grid: vectorised full scan
+        m = (fx >= x0) & (fx <= x1) & (fy >= y0) & (fy <= y1)
+        in_idx = np.where(m)[0]
     if in_idx.size == 0:
         return
     data = vp["data"]
-    sub = data[mask] if hasattr(data, "obs") else data.iloc[in_idx]
+    sub = data[in_idx] if hasattr(data, "obs") else data.iloc[in_idx]
     extra = {"max_points": vp["budget"]}
     if xr and xr[0] is not None:                   # keep the overview domain
         extra["xrange"] = vp["xrange"]
@@ -133,6 +139,47 @@ def _sel_positions(sel, draw_order):
         return []
     inv = {int(o): p for p, o in enumerate(np.asarray(draw_order))}
     return [inv[o] for o in sel if o in inv]
+
+
+def _build_grid_index(fx, fy, g=512):
+    """One-time 2D grid index over the embedding so each detail-on-zoom viewport
+    query is ~O(cells-in-view + hits) instead of an O(n) scan of every cell — the
+    key speedup for 10M+ atlases. Points are bucketed into a g×g grid; indices are
+    sorted by cell so a viewport's cell-rectangle maps to contiguous slices."""
+    fx = np.asarray(fx, "float64"); fy = np.asarray(fy, "float64")
+    x_min, x_max = float(np.nanmin(fx)), float(np.nanmax(fx))
+    y_min, y_max = float(np.nanmin(fy)), float(np.nanmax(fy))
+    xs = (x_max - x_min) or 1.0
+    ys = (y_max - y_min) or 1.0
+    gx = np.clip(((fx - x_min) / xs * g).astype(np.int64), 0, g - 1)
+    gy = np.clip(((fy - y_min) / ys * g).astype(np.int64), 0, g - 1)
+    cell = gx * g + gy
+    order = np.argsort(cell, kind="stable")
+    return {"g": g, "x_min": x_min, "y_min": y_min, "xs": xs, "ys": ys,
+            "order": order, "cell_sorted": cell[order]}
+
+
+def _grid_query(idx, x0, y0, x1, y1):
+    """Candidate point indices whose grid cells overlap [x0,x1]×[y0,y1] (a superset
+    of the exact box — caller does the precise bounds filter on this small set).
+    Returns None for a WIDE box (spans most of the grid) so the caller uses a plain
+    vectorised full scan, which is faster than looping ~every grid row."""
+    g = idx["g"]; cs = idx["cell_sorted"]; order = idx["order"]
+    def _gi(v, lo, span):
+        return int(np.clip((v - lo) / span * g, 0, g - 1))
+    gx0 = _gi(x0, idx["x_min"], idx["xs"]); gx1 = _gi(x1, idx["x_min"], idx["xs"])
+    gy0 = _gi(y0, idx["y_min"], idx["ys"]); gy1 = _gi(y1, idx["y_min"], idx["ys"])
+    if (gx1 - gx0 + 1) > g // 8 or (gy1 - gy0 + 1) > g // 8:
+        return None                              # wide -> full scan is cheaper
+    parts = []
+    for gx in range(gx0, gx1 + 1):           # each grid row is a contiguous slice
+        a = np.searchsorted(cs, gx * g + gy0, "left")
+        b = np.searchsorted(cs, gx * g + gy1 + 1, "left")
+        if b > a:
+            parts.append(order[a:b])
+    if not parts:
+        return np.empty(0, dtype=np.int64)
+    return np.concatenate(parts)
 
 
 def _viewport_handler(widget, content, buffers):
@@ -482,9 +529,13 @@ def scatterplot(
             _full = extract(data, x=_eff, y=y, layer=layer, use_raw=use_raw,
                             dims=dims, table=table)
             _lg = w._spec.get("legend") or {}
+            _fx = np.asarray(_full.x, "float64")
+            _fy = np.asarray(_full.y, "float64")
             w._vp = {"data": data, "base": base, "bk": bk, "budget": budget,
-                     "x": np.asarray(_full.x, "float64"),
-                     "y": np.asarray(_full.y, "float64"),
+                     "x": _fx, "y": _fy,
+                     "grid": None,   # built in a background thread (below) so it
+                                     # doesn't delay first paint; full-scan until ready
+
                      # keep the overview's data domain so the camera stays put and
                      # the in-view points land in the right place.
                      "xrange": (w._spec.get("x_min"), w._spec.get("x_max")),
@@ -517,6 +568,14 @@ def scatterplot(
                 except Exception:
                     pass
             w.observe(_on_user_sel, names="_selection")
+
+            def _mk_grid(_w=w, _fx=_fx, _fy=_fy):
+                try:
+                    _w._vp["grid"] = _build_grid_index(_fx, _fy)
+                except Exception:
+                    pass
+            import threading
+            threading.Thread(target=_mk_grid, daemon=True).start()
         except Exception:
             pass
         return w
