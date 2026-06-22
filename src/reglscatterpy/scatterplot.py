@@ -69,6 +69,7 @@ def _viewport_payload(widget, bounds, pad=0.6):
     vp = getattr(widget, "_vp", None)
     if not vp:
         return
+    pad = vp.get("pad", pad)
     x0, y0, x1, y1 = (float(b) for b in bounds)
     xr, yr = vp.get("xrange"), vp.get("yrange")
     # Zoomed back out to ~the full extent? Push the cached overview channels
@@ -422,6 +423,8 @@ def scatterplot(
     fast: bool = False,             # experimental: binary transfer (implies interactive)
     progressive: bool = False,      # experimental: density-sketch overview + full detail as you zoom in
     detail_on_zoom: bool = False,   # internal: emit viewport messages so the kernel re-renders in-view cells
+    overscan: float = 0.6,          # progressive: fetch this fraction of margin around the view (fewer = lighter pan, more hard cuts)
+    detail_max_points: Optional[int] = None,  # progressive: max points per detail viewport (fewer = smoother pan); None = use max_points/500k
     performance_mode: Optional[bool] = None,  # squares+no-blend (faster) vs round circles; None=auto (n>500k), forced on for progressive unless set False
     _color_categories=None,         # internal: pin the full categorical level set (detail-on-zoom colour consistency)
     show: bool = True,
@@ -524,7 +527,9 @@ def scatterplot(
         # re-render ALL cells inside the viewport as you zoom in (the view holds few
         # cells when zoomed, so we can draw them all -> full detail + complete lasso,
         # with NO preprocessing). Shared plotId so each re-render replaces the plot.
-        budget = max_points if (isinstance(max_points, int) and max_points) else _DEFAULT_MAX_POINTS
+        budget = (detail_max_points if (isinstance(detail_max_points, int) and detail_max_points)
+                  else (max_points if (isinstance(max_points, int) and max_points)
+                        else _DEFAULT_MAX_POINTS))
         # A lighter overview re-renders fast on zoom-out (the heaviest refresh);
         # zoom-in detail still uses the full budget.
         overview_budget = min(budget, 250_000)
@@ -562,6 +567,7 @@ def scatterplot(
                      # the JS caches the overview buffers; zoom-out just asks it to
                      # redraw them. Track state to skip redundant redraws on pan.
                      "showing_overview": True,
+                     "pad": float(overscan),   # overscan margin (tunable)
                      # logical lasso (ORIGINAL indices) so it persists across zoom;
                      # updated only by real user lassos (re-applies use msg.select,
                      # which never touches the _selection trait -> no observer fire).
