@@ -601,6 +601,11 @@ def scatterplot(
         categorical_palette = palette
     if components is not _UNSET and components is not None:
         dims = tuple(int(c) - 1 for c in components)   # 1-based -> 0-based
+    if detail_on_zoom and not progressive:
+        # detail_on_zoom is the INTERNAL (JS-emit) half; on its own it would emit
+        # viewport requests with no kernel handler -> endless spinner. Treat the
+        # user's intent as progressive (which wires up the handler).
+        progressive = True
     _auto_max = (max_points == "auto")
     if _auto_max:
         max_points = _DEFAULT_MAX_POINTS   # smooth by default; pass max_points=None for all points
