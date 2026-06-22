@@ -1135,18 +1135,30 @@ def scatterplot(
         spec["performanceMode"] = bool(_performance_mode)
 
     if add_outline:
-        # scanpy-style per-point outline (dark ring + background gap). Drawn in the
-        # patched point shader (single pass -> no extra points, no perf cost).
-        # performanceMode renders squares with no outline, so turn it off here.
-        ow = outline_width or (0.3, 0.05)
-        spec["addOutline"] = True
-        spec["performanceMode"] = False
-        spec["outlineWidth"] = float(ow[0])
-        spec["outlineGap"] = float(ow[1]) if len(ow) > 1 else 0.05
-        oc = outline_color or ("black", "white")
-        spec["outlineColor"] = _rgb01(oc[0])
-        _gap = oc[1] if len(oc) > 1 else (background_color or "white")
-        spec["outlineGapColor"] = _rgb01(_gap, fallback=(1.0, 1.0, 1.0))
+        # scanpy-style add_outline: a crisp ring + background gap behind EVERY point,
+        # using the engine's antialiased outline passes (the look of a selection).
+        # It's 2 extra full-cloud draw passes, so cap it at a size where the ring is
+        # actually visible AND cheap — above that it's slow and invisible (~1px), so
+        # skip with a warning (use w.highlight() to mark a subset instead).
+        _rendered = n if draw_order is None else int(np.asarray(draw_order).size)
+        if _rendered > 150_000:
+            import warnings
+            warnings.warn(
+                f"add_outline skipped: {_rendered:,} drawn points is too many to "
+                "outline without slowing rendering (and the ring is invisible at "
+                "that scale). Use it on smaller plots, or w.highlight() to mark a "
+                "subset of cells.",
+                stacklevel=2,
+            )
+        else:
+            ow = outline_width or (0.3, 0.05)
+            oc = outline_color or ("black", "white")
+            spec["addOutline"] = True
+            spec["performanceMode"] = False   # need round points for a round ring
+            spec["outlineAllWidth"] = max(1.0, float(ow[0]) * float(point_size or 4))
+            _rgb = _rgb01(oc[0])
+            spec["outlineColor"] = "#%02x%02x%02x" % tuple(
+                int(round(max(0.0, min(1.0, c)) * 255)) for c in _rgb)
 
     # Be honest about subsampling: caption the plot ("X of Y shown") and, when the
     # downsample was automatic (not user-requested), warn — so a subsampled plot is
