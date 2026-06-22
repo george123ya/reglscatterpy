@@ -55,6 +55,52 @@ rs.scatterplot(df, x="x", y="y", color_by="ct")
 Plots are **700 px wide by default** (not the full cell width). Pass `width=`
 (pixels) for a different size, or `width=None` to fill the cell.
 
+## Big data: atlas-scale rendering
+
+By default `scatterplot()` keeps huge datasets interactive **without silently
+hiding cells**, controlled by `max_points` (default `"auto"`):
+
+```python
+# AUTO (default): caps at 500k via a density-preserving subsample.
+rs.scatterplot(adata, basis="umap", color_by="cell_type")
+# -> on-plot caption "500,000 of 3,900,000 shown" + a one-time warning.
+```
+
+The `"auto"` subsample uses a 2-D grid **density sketch** (`subsample="density"`)
+that thins dense blobs but **keeps rare cell types** — unlike uniform random
+sampling, which drops them (`subsample="random"` is the uniform fallback). The
+plot is always honest about it: the `"X of Y shown"` caption is drawn on the
+figure, `repr()` reflects it, and an automatic downsample warns once.
+`w.selection` still indexes the **original** rows.
+
+```python
+# ALL POINTS RESIDENT (the Allen ABC-Atlas method): every cell on the GPU,
+# camera-only pan/zoom. Smooth up to ~4M cells on a decent GPU.
+rs.scatterplot(adata, basis="umap", color_by="cell_type", max_points=None)
+
+rs.scatterplot(adata, basis="umap", color_by="cell_type", max_points=1_000_000)
+```
+
+For datasets **larger than ~4M** (where all-resident gets heavy), use
+`progressive=True` — detail-on-zoom, an in-memory tiling with no preprocessing:
+
+```python
+rs.scatterplot(adata, basis="umap", color_by="cell_type", progressive=True)
+```
+
+It shows a light density-sketch overview, then re-renders **all cells inside the
+viewport** as you zoom in (a zoomed view holds few cells, so they draw at full
+detail with a complete lasso). The camera domain stays fixed and the overview
+snaps back instantly on zoom-out. Knobs:
+
+- `detail_max_points=N` — max points per zoomed-in viewport (lower = smoother
+  pan; defaults to `max_points`/500k).
+- `overscan=0.6` — fraction of margin fetched around the view, so panning has no
+  hard cuts (lower = lighter pan, more visible edges).
+
+Rule of thumb: `max_points=None` for ~2–4M real atlases; `progressive=True` only
+beyond that. `progressive=True` always uses the live (interactive) widget.
+
 ## Gallery
 
 | Categorical colouring | Continuous (gene) colouring |
@@ -218,15 +264,21 @@ rs.scatterplot(adata, basis="umap", color_by=["louvain", "CST3", "NKG7"])
 > be a numpy array / pandas Series (not a list of strings).
 
 Or compose pre-built plots — e.g. compare different embeddings side by side.
-Linked grids sync over the kernel, so build the panels with `interactive=True`:
+`compose()` auto-upgrades plain plots to live widgets, so you don't need
+`interactive=True` on each:
 
 ```python
 from reglscatterpy import scatterplot, compose
 
-a = scatterplot(adata, basis="umap", color_by="leiden", interactive=True)
-b = scatterplot(adata, basis="pca",  color_by="leiden", interactive=True)
+a = scatterplot(adata, basis="umap", color_by="leiden")
+b = scatterplot(adata, basis="pca",  color_by="leiden")
 compose([a, b])            # 2-up grid, linked camera + selection
 ```
+
+A lasso or legend-category filter on one panel propagates to the others **by
+original cell** — even across panels coloured by different variables, and even
+when the panels are `progressive=True` (each panel fetches detail for the synced
+viewport). A view reset on one panel resets the whole group.
 
 ## Toolbar & selection extras
 

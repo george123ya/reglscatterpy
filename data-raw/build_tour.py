@@ -86,6 +86,40 @@ md("## 6. Other components / embeddings\n"
    "`components=(i, j)` is 1-based (scanpy). Plot PC2 vs PC3:")
 code("rs.scatterplot(adata, basis='pca', color='cluster', components=(2, 3))")
 
+md("## Big data — atlas-scale rendering\n"
+   "`scatterplot()` stays interactive on huge data **without silently hiding cells**. "
+   "Let's make a larger synthetic atlas to demo the three modes.")
+code(
+"bn, bk = 1_500_000, 12\n"
+"blab = rng.integers(0, bk, bn)\n"
+"bcent = rng.normal(0, 8, (bk, 2))\n"
+"bumap = bcent[blab] + rng.normal(0, 1.0, (bn, 2))\n"
+"big = ad.AnnData(\n"
+"    X=np.zeros((bn, 1), dtype='float32'),\n"
+"    obs=pd.DataFrame({'cell_type': pd.Categorical([f'T{l}' for l in blab]),\n"
+"                      'score': rng.random(bn).astype('float32')}),\n"
+")\n"
+"big.obsm['X_umap'] = bumap.astype('float32')\n"
+"big")
+
+md("### Auto density subsample (default)\n"
+   "`max_points='auto'` (the default) caps at 500k via a **density-preserving** sketch that thins "
+   "dense blobs but keeps rare types. It's honest about it: an on-plot `'X of Y shown'` caption + a "
+   "one-time warning. `subsample='random'` is the uniform fallback.")
+code("rs.scatterplot(big, basis='umap', color='cell_type')   # caption + downsample warning")
+
+md("### All points resident (ABC-Atlas style)\n"
+   "`max_points=None` puts **every** cell on the GPU; pan/zoom is camera-only. Smooth up to ~4M "
+   "points on a decent GPU.")
+code("rs.scatterplot(big, basis='umap', color='cell_type', max_points=None)")
+
+md("### Progressive detail-on-zoom (>4M)\n"
+   "`progressive=True` shows a light density overview, then re-renders **all cells inside the "
+   "viewport** as you zoom in (no preprocessing; always the live widget). Tune with "
+   "`detail_max_points` (points per viewport) and `overscan` (margin fetched around the view).")
+code("rs.scatterplot(big, basis='umap', color='cell_type',\n"
+     "               progressive=True, detail_max_points=300_000, overscan=0.6)")
+
 md("## 7. Multi-panel grid\n"
    "A **list** of names → one linked panel per value (genes and/or obs), camera + lasso synced. "
    "`ncols` sets the columns. (A single-element list is just one plot.)")

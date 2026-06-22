@@ -15,10 +15,13 @@ The signature mirrors the R ``reglScatterplot()`` so the two feel like one tool.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
+
+_log = logging.getLogger("reglscatterpy")
 
 from ._extract import (
     ColorSpec,
@@ -197,12 +200,30 @@ def _keep_positions(vp, draw_order):
     return None if fk is None else _sel_positions(fk, draw_order)
 
 
+_INV_CACHE = {}  # id(draw_order) -> (draw_order_ref, {original_index: position})
+
+
+def _inv_map(draw_order):
+    """Cached original-index -> draw-position map. Rebuilding this dict on every
+    viewport swap (per panel) is O(n) and was dominating selection/filter syncing
+    for 10M-cell atlases; draw_order is stable per panel, so cache by identity."""
+    key = id(draw_order)
+    cached = _INV_CACHE.get(key)
+    if cached is not None and cached[0] is draw_order:
+        return cached[1]
+    inv = {int(o): p for p, o in enumerate(np.asarray(draw_order))}
+    if len(_INV_CACHE) > 32:        # bound the cache (a session rarely needs many)
+        _INV_CACHE.clear()
+    _INV_CACHE[key] = (draw_order, inv)
+    return inv
+
+
 def _sel_positions(sel, draw_order):
     """Map a logical (original-index) selection to positions in a draw order, so a
     persisted lasso re-highlights the SAME cells after a viewport swap."""
     if not sel or draw_order is None:
         return []
-    inv = {int(o): p for p, o in enumerate(np.asarray(draw_order))}
+    inv = _inv_map(draw_order)
     return [inv[o] for o in sel if o in inv]
 
 
@@ -328,7 +349,14 @@ def _viewport_handler(widget, content, buffers):
         elif t == "legend_filter":
             _legend_filter_payload(widget, content.get("cats"))
     except Exception:
-        pass
+        # Detail-on-zoom must never wedge the UI: log for diagnosis (silent by
+        # default; surfaces under logging.basicConfig(level=DEBUG)) and clear the
+        # client's loading spinner so it doesn't spin forever on a failed fetch.
+        _log.debug("viewport handler failed", exc_info=True)
+        try:
+            widget.send({"type": "vp_noop"})
+        except Exception:
+            pass
 
 
 def _maybe_save(obj, save):
@@ -622,6 +650,15 @@ def scatterplot(
     ``save`` — and the original names (``color_by``, ``point_size``,
     ``continuous_palette``, ``categorical_palette``, ``dims`` …) keep working.
     """
+    # `detail_on_zoom` is the INTERNAL engine behind `progressive=` (it wires up
+    # the viewport round-trip). A user passing it directly — without progressive —
+    # gets viewport messages with no handler, i.e. an endless spinner. Promote it
+    # to `progressive=True`. `plot_id` is set only by the internal overview
+    # recursion, which must NOT re-enter this guard (would recurse forever).
+    if detail_on_zoom and not progressive and plot_id is None:
+        progressive = True
+        detail_on_zoom = False
+
     # snapshot the call args up front so progressive mode can re-render the FULL
     # data through this exact same pipeline (keeps lasso/filter/tooltip identical)
     _params = {k: v for k, v in locals().items() if k != "data"}
@@ -681,6 +718,7 @@ def scatterplot(
         # base64 channels (fast=False) so in-view updates can ship over a custom
         # message and be applied via plot.draw (no _spec change -> no re-render).
         base = {**_params, "progressive": False, "interactive": True, "show": False,
+                "save": None,   # save once on the final widget, not the overview recursion
                 "fast": True, "plot_id": pid, "detail_on_zoom": True}   # binary channels
         w = scatterplot(data, **{**base, "max_points": overview_budget}, **bk)   # overview
         try:
@@ -742,18 +780,37 @@ def scatterplot(
                         vp["sel"] = {int(p) for p in pos}
                     vp["showing_overview"] = False   # rebuild overview∪selection next zoom-out
                 except Exception:
-                    pass
+                    _log.debug("selection observer failed", exc_info=True)
             w.observe(_on_user_sel, names="_selection")
 
             def _mk_grid(_w=w, _fx=_fx, _fy=_fy):
                 try:
                     _w._vp["grid"] = _build_grid_index(_fx, _fy)
                 except Exception:
-                    pass
+                    _log.debug("grid index build failed", exc_info=True)
             import threading
             threading.Thread(target=_mk_grid, daemon=True).start()
         except Exception:
-            pass
+            _log.debug("progressive setup failed; falling back to plain widget",
+                       exc_info=True)
+        if save:
+            # save= was silently ignored for progressive plots. A static HTML has
+            # no kernel, so detail-on-zoom can't work there — write an honest
+            # static overview snapshot (non-binary so it's JSON-serializable).
+            import warnings
+            warnings.warn(
+                "save= with progressive=True writes a static overview snapshot; "
+                "the saved HTML has no kernel, so detail-on-zoom is unavailable.",
+                stacklevel=2,
+            )
+            try:
+                snap = scatterplot(data, **{**base, "fast": False,
+                                            "interactive": False,
+                                            "detail_on_zoom": False,
+                                            "max_points": overview_budget}, **bk)
+                _maybe_save(snap, save)
+            except Exception:
+                _log.debug("progressive save snapshot failed", exc_info=True)
         return w
 
     # --- validate enum-ish arguments up front (fail before doing work) ------
