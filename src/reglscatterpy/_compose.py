@@ -81,6 +81,14 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync: bool = True):
         w._width = 0   # panels are responsive so they fit their grid column
         w._spec = spec  # re-renders the widget with the sync wiring
 
+    # progressive panels coordinate selection/filter across the group by ORIGINAL
+    # cell index (each maps to its own draw order) — give each a ref to the siblings.
+    if sync:
+        for w in plots:
+            vp = getattr(w, "_vp", None)
+            if vp is not None:
+                vp["group"] = plots
+
     cols = cols or ceil(sqrt(len(plots)))
     return ipywidgets.GridBox(
         plots,

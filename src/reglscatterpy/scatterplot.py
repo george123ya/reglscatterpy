@@ -88,7 +88,7 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
             widget._draw_order = vp["overview_draw_order"]
             widget._source = vp["data"]
             widget.send({"type": "vp_overview", "seq": seq,   # cached overview (fast)
-                         "select": []})
+                         "select": [], "keep": _keep_positions(vp, vp["overview_draw_order"])})
             return
         # selection present -> render the overview density-sketch UNION the selected
         # cells so they're all drawn + highlighted (else only the ~1% in the sketch show).
@@ -111,7 +111,7 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
         widget._inv_draw_order = None
         widget._draw_order = orig
         widget._source = data
-        _vp_send(widget, w2._spec, _sel_positions(sel, orig), seq)
+        _vp_send(widget, w2._spec, _sel_positions(sel, orig), seq, _keep_positions(vp, orig))
         return
     vp["showing_overview"] = False
     # Skip the round-trip if the new view is still inside the region we last fetched
@@ -169,10 +169,10 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
     # _spec, so no re-mount / spinner / plot recreation. Re-map the persisted lasso
     # to the new in-view positions so it follows the same cells.
     vp["last_fetch"] = (x0, y0, x1, y1, _vspan)    # padded region + the view span we fetched at
-    _vp_send(widget, w2._spec, _sel_positions(vp.get("sel"), orig), seq)
+    _vp_send(widget, w2._spec, _sel_positions(vp.get("sel"), orig), seq, _keep_positions(vp, orig))
 
 
-def _vp_send(widget, spec, select, seq):
+def _vp_send(widget, spec, select, seq, keep=None):
     """Ship an in-place plot.draw update. The big per-point channels (x/y/z/w) go
     as raw binary comm BUFFERS (no base64 inflate/decode); the small bits
     (group/tooltip/filter) stay in the JSON content."""
@@ -187,8 +187,14 @@ def _vp_send(widget, spec, select, seq):
                "group_data": spec.get("group_data"),
                "tooltip_data": spec.get("tooltip_data"),
                "filter_data": spec.get("filter_data"),
-               "select": select, "seq": seq}
+               "select": select, "keep": keep, "seq": seq}
     widget.send(content, buffers=buffers)
+
+
+def _keep_positions(vp, draw_order):
+    """Filter-keep positions for the current draw order (None = no active filter)."""
+    fk = vp.get("filter_keep")
+    return None if fk is None else _sel_positions(fk, draw_order)
 
 
 def _sel_positions(sel, draw_order):
@@ -269,12 +275,45 @@ def _lasso_payload(widget, polygon):
     if not vp or not polygon or len(polygon) < 3:
         return
     mask = _points_in_polygon(vp["x"], vp["y"], polygon)
-    sel = {int(i) for i in np.where(mask)[0]}
-    vp["sel"] = sel                                  # logical selection = all in region
-    vp["showing_overview"] = False                   # rebuild overview∪selection on next zoom-out
-    widget._source = vp["data"]
-    widget.send({"type": "vp_select",
-                 "select": _sel_positions(sel, widget._draw_order)})
+    sel = {int(i) for i in np.where(mask)[0]}        # original cells in the lasso
+    # propagate to every linked panel (same embedding/cells) — each highlights its
+    # own in-view subset of the SAME original cells.
+    for panel in (vp.get("group") or [widget]):
+        pvp = getattr(panel, "_vp", None)
+        if pvp is None:
+            continue
+        pvp["sel"] = sel
+        pvp["showing_overview"] = False              # rebuild overview∪selection on zoom-out
+        panel._source = pvp["data"]
+        panel.send({"type": "vp_select",
+                    "select": _sel_positions(sel, panel._draw_order)})
+
+
+def _legend_filter_payload(widget, cats):
+    """Legend category filter, synced across linked panels by ORIGINAL cell: keep only
+    cells whose (clicked panel's categorical) colour is in ``cats``, mapped per panel.
+    Works cross-variable (other panels just hide the same cells) — unlike positional
+    sync, which breaks when panels draw in different orders."""
+    vp = getattr(widget, "_vp", None)
+    if not vp:
+        return
+    codes, levels = vp.get("color_codes"), vp.get("color_levels")
+    if codes is None or levels is None:
+        return
+    if not cats:
+        keep = None                                  # cleared -> show all
+    else:
+        want = {str(c) for c in cats}
+        sel_codes = [i for i, lv in enumerate(levels) if lv in want]
+        keep = {int(i) for i in np.where(np.isin(codes, sel_codes))[0]}
+    for panel in (vp.get("group") or [widget]):
+        pvp = getattr(panel, "_vp", None)
+        if pvp is None:
+            continue
+        pvp["filter_keep"] = keep
+        panel.send({"type": "vp_filter",
+                    "keep": (None if keep is None
+                             else _sel_positions(keep, panel._draw_order))})
 
 
 def _viewport_handler(widget, content, buffers):
@@ -286,6 +325,8 @@ def _viewport_handler(widget, content, buffers):
             _viewport_payload(widget, content["bounds"], seq=content.get("seq"))
         elif t == "lasso":
             _lasso_payload(widget, content.get("polygon"))
+        elif t == "legend_filter":
+            _legend_filter_payload(widget, content.get("cats"))
     except Exception:
         pass
 
@@ -645,11 +686,18 @@ def scatterplot(
         try:
             _io = _is_anndata(data) or _is_mudata(data) or _is_spatialdata(data)
             _eff = basis if (_io and basis is not None) else x
-            _full = extract(data, x=_eff, y=y, layer=layer, use_raw=use_raw,
-                            dims=dims, table=table)
+            _full = extract(data, x=_eff, y=y, color_by=color_by, layer=layer,
+                            use_raw=use_raw, dims=dims, table=table)
             _lg = w._spec.get("legend") or {}
             _fx = np.asarray(_full.x, "float64")
             _fy = np.asarray(_full.y, "float64")
+            # full categorical colour (codes+levels) so a legend filter can resolve to
+            # ORIGINAL cells and sync across linked panels.
+            _ccodes = _clevels = None
+            if _full.color is not None and _lg.get("var_type") == "categorical":
+                _ccat = pd.Categorical(pd.Series(_full.color).astype(str))
+                _ccodes = _ccat.codes
+                _clevels = [str(c) for c in _ccat.categories]
             w._vp = {"data": data, "base": base, "bk": bk, "budget": budget,
                      "x": _fx, "y": _fy,
                      "grid": None,   # built in a background thread (below) so it
@@ -670,6 +718,9 @@ def scatterplot(
                      # redraw them. Track state to skip redundant redraws on pan.
                      "showing_overview": True,
                      "pad": float(overscan),   # overscan margin (tunable)
+                     # legend-filter sync across linked panels (original-cell based)
+                     "color_codes": _ccodes, "color_levels": _clevels,
+                     "filter_keep": None, "group": None,
                      # logical lasso (ORIGINAL indices) so it persists across zoom;
                      # updated only by real user lassos (re-applies use msg.select,
                      # which never touches the _selection trait -> no observer fire).
