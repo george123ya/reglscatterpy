@@ -207,6 +207,7 @@ def _build_color_payload(
     center_zero,
     na_color="lightgray",
     groups=None,
+    categories=None,
 ):
     options: dict = {}
     legend: dict = {}
@@ -232,8 +233,15 @@ def _build_color_payload(
         s = s.astype("object")
         if s.isna().any():
             s = s.where(s.notna(), "NA")
-        cat = s.astype("category")
-        levels = list(cat.cat.categories)
+        s = s.astype(str)
+        # ``categories`` pins the FULL ordered level set (e.g. from the overview) so
+        # a subset/viewport keeps identical codes + palette — without it, a zoomed-in
+        # view re-derives levels from only what's present and the colours shift.
+        if categories is not None:
+            cat = pd.Categorical(s, categories=[str(c) for c in categories])
+        else:
+            cat = pd.Categorical(s)
+        levels = list(cat.categories)
         hex_cols = _resolve_categorical_palette(
             [str(lv) for lv in levels], custom_colors, custom_palette, categorical_palette
         )
@@ -244,8 +252,8 @@ def _build_color_payload(
             slv = str(lv)
             if slv == "NA" or (keep is not None and slv not in keep):
                 hex_cols[i] = na_color
-        z = cat.cat.codes.to_numpy().astype("int64")  # 0-based, matches as.integer(f)-1
-        counts = cat.value_counts().reindex(levels).fillna(0).astype("int64")
+        z = cat.codes.astype("int64")  # 0-based, matches as.integer(f)-1
+        counts = pd.Series(cat).value_counts().reindex(levels).fillna(0).astype("int64")
         options = {"colorBy": "valueA", "pointColor": hex_cols}
         legend = {
             "names": [str(lv) for lv in levels],
@@ -318,6 +326,7 @@ def build_payload(
     center_zero=False,
     na_color="lightgray",
     groups=None,
+    categories=None,
     xrange=None,
     yrange=None,
     range_padding=0.15,
@@ -390,7 +399,7 @@ def build_payload(
     color_payload = _build_color_payload(
         data.color, color_var_name, legend_title, point_color,
         categorical_palette, continuous_palette, custom_palette, custom_colors,
-        vmin, vmax, center_zero, na_color, groups,
+        vmin, vmax, center_zero, na_color, groups, categories,
     )
     options = color_payload["options"]
     options["size"] = point_size

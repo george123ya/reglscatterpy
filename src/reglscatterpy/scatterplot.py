@@ -110,6 +110,8 @@ def _viewport_payload(widget, bounds, pad=0.6):
     if vp.get("vmin") is not None:                 # keep the colour scale constant
         extra["vmin"] = vp["vmin"]
         extra["vmax"] = vp["vmax"]
+    if vp.get("categories") is not None:           # keep categorical colours/codes constant
+        extra["_color_categories"] = vp["categories"]
     w2 = scatterplot(sub, **{**vp["base"], **extra}, **vp["bk"])
     do = w2._draw_order
     orig = in_idx if do is None else in_idx[np.asarray(do)]
@@ -421,6 +423,7 @@ def scatterplot(
     progressive: bool = False,      # experimental: density-sketch overview + full detail as you zoom in
     detail_on_zoom: bool = False,   # internal: emit viewport messages so the kernel re-renders in-view cells
     performance_mode: Optional[bool] = None,  # squares+no-blend (faster) vs round circles; None=auto (n>500k), forced on for progressive unless set False
+    _color_categories=None,         # internal: pin the full categorical level set (detail-on-zoom colour consistency)
     show: bool = True,
     **backend_kwargs: Any,
 ):
@@ -543,6 +546,10 @@ def scatterplot(
                      # keep point size + colour scale fixed across refreshes.
                      "point_size": (w._spec.get("options") or {}).get("size"),
                      "vmin": _lg.get("minVal"), "vmax": _lg.get("maxVal"),
+                     # full categorical level set -> detail views keep identical
+                     # colours + codes (else zoomed-in colours shift & legend mis-filters).
+                     "categories": (_lg.get("names")
+                                    if _lg.get("var_type") == "categorical" else None),
                      # the JS caches the overview buffers; zoom-out just asks it to
                      # redraw them. Track state to skip redundant redraws on pan.
                      "showing_overview": True,
@@ -720,7 +727,7 @@ def scatterplot(
         categorical_palette=categorical_palette, continuous_palette=continuous_palette,
         custom_palette=custom_palette, custom_colors=custom_colors,
         vmin=vmin, vmax=vmax, center_zero=center_zero,
-        na_color=na_color, groups=groups,
+        na_color=na_color, groups=groups, categories=_color_categories,
         xrange=xrange, yrange=yrange, range_padding=range_padding,
         xlab=xlab, ylab=ylab, title=title, legend_title=legend_title,
         show_axes=show_axes, show_tooltip=show_tooltip,
