@@ -925,7 +925,14 @@ def scatterplot(
                 continuous_palette=continuous_palette, custom_palette=custom_palette,
                 custom_colors=custom_colors, vmin=vmin, vmax=vmax,
                 center_zero=center_zero, na_color=na_color, groups=groups,
-                sort_order=sort_order, random_state=random_state, max_points=max_points,
+                # Linked panels are the SAME cells and the widget syncs selection +
+                # filters POSITIONALLY across them, so every panel MUST draw cells in
+                # the same order. A per-colour value-sort (sort_order=True) would give
+                # each panel a different order -> a lasso/filter in one panel would hit
+                # the wrong cells in the others. Force a colour-independent shared order
+                # (subsample/random_state are identical across panels; only the value-
+                # sort differs, so we drop it here).
+                sort_order=False, random_state=random_state, max_points=max_points,
                 subsample=subsample,
                 progressive=progressive, progressive_opts=progressive_opts,
                 title=(title or name), xlab=xlab, ylab=ylab,
