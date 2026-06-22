@@ -81,11 +81,39 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
             return                              # already at overview -> no redundant redraw
         vp["showing_overview"] = True
         vp["last_fetch"] = None                 # so the next zoom-in re-fetches detail
+        sel = vp.get("sel")
+        if not sel:
+            widget._inv_draw_order = None
+            widget._draw_order = vp["overview_draw_order"]
+            widget._source = vp["data"]
+            widget.send({"type": "vp_overview", "seq": seq,   # cached overview (fast)
+                         "select": []})
+            return
+        # selection present -> render the overview density-sketch UNION the selected
+        # cells so they're all drawn + highlighted (else only the ~1% in the sketch show).
+        base = np.asarray(vp["overview_draw_order"])
+        aug = np.unique(np.concatenate([base, np.fromiter(sel, dtype=np.int64)]))
+        data = vp["data"]
+        sub = data[aug] if hasattr(data, "obs") else data.iloc[aug]
+        extra = {"max_points": None}            # keep ALL selected (don't re-subsample)
+        if xr and xr[0] is not None:
+            extra["xrange"] = vp["xrange"]; extra["yrange"] = vp["yrange"]
+        if vp.get("point_size") is not None:
+            extra["point_size"] = vp["point_size"]
+        if vp.get("vmin") is not None:
+            extra["vmin"] = vp["vmin"]; extra["vmax"] = vp["vmax"]
+        if vp.get("categories") is not None:
+            extra["_color_categories"] = vp["categories"]
+        w2 = scatterplot(sub, **{**vp["base"], **extra}, **vp["bk"])
+        do = w2._draw_order
+        orig = aug if do is None else aug[np.asarray(do)]
         widget._inv_draw_order = None
-        widget._draw_order = vp["overview_draw_order"]
-        widget._source = vp["data"]
-        widget.send({"type": "vp_overview", "seq": seq,   # JS redraws cached overview
-                     "select": _sel_positions(vp.get("sel"), vp["overview_draw_order"])})
+        widget._draw_order = orig
+        widget._source = data
+        _m = _vp_channels(w2._spec)
+        _m["select"] = _sel_positions(sel, orig)
+        _m["seq"] = seq
+        widget.send(_m)
         return
     vp["showing_overview"] = False
     # Skip the round-trip if the new view is still inside the region we last fetched
@@ -229,6 +257,7 @@ def _lasso_payload(widget, polygon):
     mask = _points_in_polygon(vp["x"], vp["y"], polygon)
     sel = {int(i) for i in np.where(mask)[0]}
     vp["sel"] = sel                                  # logical selection = all in region
+    vp["showing_overview"] = False                   # rebuild overview∪selection on next zoom-out
     widget._source = vp["data"]
     widget.send({"type": "vp_select",
                  "select": _sel_positions(sel, widget._draw_order)})
@@ -641,6 +670,7 @@ def scatterplot(
                         vp["sel"] = {int(od[p]) for p in pos if 0 <= p < od.size}
                     else:
                         vp["sel"] = {int(p) for p in pos}
+                    vp["showing_overview"] = False   # rebuild overview∪selection next zoom-out
                 except Exception:
                     pass
             w.observe(_on_user_sel, names="_selection")
