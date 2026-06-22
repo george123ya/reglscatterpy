@@ -404,6 +404,26 @@ def _viewport_handler(widget, content, buffers):
             pass
 
 
+def _rgb01(c, fallback=(0.0, 0.0, 0.0)):
+    """A colour name / hex string -> normalised (r, g, b) in 0..1 for a GL uniform."""
+    try:
+        import matplotlib.colors as mcolors
+        return list(mcolors.to_rgb(c))
+    except Exception:
+        pass
+    s = str(c).strip().lower()
+    _named = {"black": (0, 0, 0), "white": (1, 1, 1), "gray": (.5, .5, .5),
+              "grey": (.5, .5, .5), "lightgray": (.83, .83, .83),
+              "lightgrey": (.83, .83, .83), "none": tuple(fallback)}
+    if s in _named:
+        return list(_named[s])
+    if s.startswith("#") and len(s) in (4, 7):
+        if len(s) == 4:
+            s = "#" + "".join(ch * 2 for ch in s[1:])
+        return [int(s[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    return list(fallback)
+
+
 def _maybe_save(obj, save):
     """scanpy-style ``save=``: write the plot to a file. ``.html`` is supported
     programmatically (self-contained); image formats need the in-plot button."""
@@ -573,6 +593,9 @@ def scatterplot(
     save: Optional[str] = None,     # write to a file (.html now; see docs)
     na_color: str = "lightgray",    # colour for NaN / un-selected categories
     groups: Any = None,             # show only these categories; grey the rest
+    add_outline: bool = False,      # scanpy-style outline (dark halo) around each point
+    outline_width: Sequence[float] = (0.3, 0.05),   # (outline, gap) as fractions of the point radius
+    outline_color: Sequence = ("black", "white"),   # (outline colour, gap colour); gap defaults to the background
     sort_order: bool = True,        # draw higher continuous values on top (scanpy)
     random_state: Optional[int] = None,  # seed -> random draw order (reduce overplotting)
     max_points: Any = "auto",            # subsample huge data for smooth exploration; "auto" caps at 500k, None = all points
@@ -689,6 +712,14 @@ def scatterplot(
         The plot is captioned ``"X of Y shown"`` and an automatic cap warns once.
     subsample
         ``"density"`` (default, atlas-safe: keeps rare cells) or ``"random"``.
+    add_outline
+        Draw a scanpy-style outline (a dark ring + a background-coloured gap)
+        around every point, to make clusters pop. ``outline_width=(outline, gap)``
+        are fractions of the point radius and ``outline_color=(outline, gap)`` set
+        the two colours (the gap defaults to the background). Rendered in a single
+        shader pass — no extra points, no performance cost — but the ring is only
+        visible with reasonably large points (use it for small/medium plots, not
+        20M-cell atlases where points are ~1px).
     interactive
         ``True`` returns the live, kernel-linked widget (needed for
         ``w.selection`` / ``subset`` / ``annotate`` / linked ``compose``).
@@ -955,6 +986,8 @@ def scatterplot(
                 continuous_palette=continuous_palette, custom_palette=custom_palette,
                 custom_colors=custom_colors, vmin=vmin, vmax=vmax,
                 center_zero=center_zero, na_color=na_color, groups=groups,
+                add_outline=add_outline, outline_width=outline_width,
+                outline_color=outline_color,
                 # Linked panels are the SAME cells and the widget syncs selection +
                 # filters POSITIONALLY across them, so every panel MUST draw cells in
                 # the same order. A per-colour value-sort (sort_order=True) would give
@@ -1100,6 +1133,20 @@ def scatterplot(
         spec["performanceMode"] = True if _performance_mode is None else bool(_performance_mode)
     elif _performance_mode is not None:
         spec["performanceMode"] = bool(_performance_mode)
+
+    if add_outline:
+        # scanpy-style per-point outline (dark ring + background gap). Drawn in the
+        # patched point shader (single pass -> no extra points, no perf cost).
+        # performanceMode renders squares with no outline, so turn it off here.
+        ow = outline_width or (0.3, 0.05)
+        spec["addOutline"] = True
+        spec["performanceMode"] = False
+        spec["outlineWidth"] = float(ow[0])
+        spec["outlineGap"] = float(ow[1]) if len(ow) > 1 else 0.05
+        oc = outline_color or ("black", "white")
+        spec["outlineColor"] = _rgb01(oc[0])
+        _gap = oc[1] if len(oc) > 1 else (background_color or "white")
+        spec["outlineGapColor"] = _rgb01(_gap, fallback=(1.0, 1.0, 1.0))
 
     # Be honest about subsampling: caption the plot ("X of Y shown") and, when the
     # downsample was automatic (not user-requested), warn — so a subsampled plot is
