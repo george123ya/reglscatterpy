@@ -111,10 +111,7 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
         widget._inv_draw_order = None
         widget._draw_order = orig
         widget._source = data
-        _m = _vp_channels(w2._spec)
-        _m["select"] = _sel_positions(sel, orig)
-        _m["seq"] = seq
-        widget.send(_m)
+        _vp_send(widget, w2._spec, _sel_positions(sel, orig), seq)
         return
     vp["showing_overview"] = False
     # Skip the round-trip if the new view is still inside the region we last fetched
@@ -164,20 +161,27 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
     # Swap points on the EXISTING plot (custom message -> plot.draw); never touches
     # _spec, so no re-mount / spinner / plot recreation. Re-map the persisted lasso
     # to the new in-view positions so it follows the same cells.
-    _msg = _vp_channels(w2._spec)
-    _msg["select"] = _sel_positions(vp.get("sel"), orig)
-    _msg["seq"] = seq
     vp["last_fetch"] = (x0, y0, x1, y1, _vspan)    # padded region + the view span we fetched at
-    widget.send(_msg)
+    _vp_send(widget, w2._spec, _sel_positions(vp.get("sel"), orig), seq)
 
 
-def _vp_channels(spec):
-    """The point channels to ship for an in-place plot.draw update."""
-    return {"type": "vp_update",
-            "x": spec.get("x"), "y": spec.get("y"), "z": spec.get("z"),
-            "w": spec.get("w"), "group_data": spec.get("group_data"),
-            "tooltip_data": spec.get("tooltip_data"), "filter_data": spec.get("filter_data"),
-            "n_points": spec.get("n_points")}
+def _vp_send(widget, spec, select, seq):
+    """Ship an in-place plot.draw update. The big per-point channels (x/y/z/w) go
+    as raw binary comm BUFFERS (no base64 inflate/decode); the small bits
+    (group/tooltip/filter) stay in the JSON content."""
+    order, buffers = [], []
+    for k in ("x", "y", "z", "w"):
+        ch = spec.get(k)
+        if ch is not None:
+            order.append(k)
+            buffers.append(ch if isinstance(ch, memoryview) else memoryview(np.ascontiguousarray(ch)))
+    content = {"type": "vp_update", "n_points": spec.get("n_points"),
+               "buf_order": order,
+               "group_data": spec.get("group_data"),
+               "tooltip_data": spec.get("tooltip_data"),
+               "filter_data": spec.get("filter_data"),
+               "select": select, "seq": seq}
+    widget.send(content, buffers=buffers)
 
 
 def _sel_positions(sel, draw_order):
@@ -624,7 +628,7 @@ def scatterplot(
         # base64 channels (fast=False) so in-view updates can ship over a custom
         # message and be applied via plot.draw (no _spec change -> no re-render).
         base = {**_params, "progressive": False, "interactive": True, "show": False,
-                "fast": False, "plot_id": pid, "detail_on_zoom": True}
+                "fast": True, "plot_id": pid, "detail_on_zoom": True}   # binary channels
         w = scatterplot(data, **{**base, "max_points": overview_budget}, **bk)   # overview
         try:
             _io = _is_anndata(data) or _is_mudata(data) or _is_spatialdata(data)
