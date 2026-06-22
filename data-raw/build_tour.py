@@ -116,9 +116,9 @@ code("rs.scatterplot(big, basis='umap', color='cell_type', max_points=None)")
 md("### Progressive detail-on-zoom (>4M)\n"
    "`progressive=True` shows a light density overview, then re-renders **all cells inside the "
    "viewport** as you zoom in (no preprocessing; always the live widget). Tune with "
-   "`detail_max_points` (points per viewport) and `overscan` (margin fetched around the view).")
-code("rs.scatterplot(big, basis='umap', color='cell_type',\n"
-     "               progressive=True, detail_max_points=300_000, overscan=0.6)")
+   "`progressive_opts={'detail_max_points': ..., 'overscan': ...}` (points per viewport / margin fetched).")
+code("rs.scatterplot(big, basis='umap', color='cell_type', progressive=True,\n"
+     "               progressive_opts={'detail_max_points': 300_000, 'overscan': 0.6})")
 
 md("## 7. Multi-panel grid\n"
    "A **list** of names → one linked panel per value (genes and/or obs), camera + lasso synced. "

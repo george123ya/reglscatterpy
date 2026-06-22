@@ -60,6 +60,43 @@ def _is_name_list(spec) -> bool:
     )
 
 
+def _build_detail(vp, idx, max_points):
+    """Build a detail widget for the given ORIGINAL indices by numpy-indexing the
+    cached full channels — no AnnData re-slice / re-extract / re-resolution per
+    viewport (the dominant cost on big sparse atlases). build_payload still does
+    the channel packing + colour encoding, so the result is byte-identical to a
+    full rebuild (same colours/codes — no shift on zoom)."""
+    import dataclasses
+    fpd = vp["full_pd"]
+    idx = np.asarray(idx)
+    sub_pd = dataclasses.replace(
+        fpd,
+        x=np.asarray(fpd.x)[idx], y=np.asarray(fpd.y)[idx],
+        color=(np.asarray(fpd.color)[idx] if fpd.color is not None else None),
+        group=(np.asarray(fpd.group)[idx] if fpd.group is not None else None),
+    )
+    fs, fo, ft, ff = (vp["full_size"], vp["full_opacity"],
+                      vp["full_tooltip"], vp["full_filter"])
+    sub_sz = None if fs is None else np.asarray(fs)[idx]
+    sub_op = None if fo is None else np.asarray(fo)[idx]
+    sub_tt = None if not ft else {k: np.asarray(v)[idx] for k, v in ft.items()}
+    sub_ft = None if ff is None else ff.iloc[idx].reset_index(drop=True)
+    extra = {"max_points": max_points}
+    xr = vp.get("xrange")
+    if xr and xr[0] is not None:                   # keep the overview domain
+        extra["xrange"] = vp["xrange"]; extra["yrange"] = vp["yrange"]
+    if vp.get("point_size") is not None:           # keep size constant
+        extra["point_size"] = vp["point_size"]
+    if vp.get("vmin") is not None:                 # keep the colour scale constant
+        extra["vmin"] = vp["vmin"]; extra["vmax"] = vp["vmax"]
+    if vp.get("categories") is not None:           # keep categorical colours/codes constant
+        extra["_color_categories"] = vp["categories"]
+    return scatterplot(None, **{**vp["base"], **extra,
+                                "_pd_data": sub_pd, "_size_values": sub_sz,
+                                "_opacity_values": sub_op, "_tooltip_cols": sub_tt,
+                                "_filter_df": sub_ft}, **vp["bk"])
+
+
 def _viewport_payload(widget, bounds, pad=0.6, seq=None):
     """Re-render the cells inside the current view (detail-on-zoom). Zoomed in,
     the viewport holds few cells so we draw them ALL (full detail + complete
@@ -95,20 +132,10 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
             return
         # selection present -> render the overview density-sketch UNION the selected
         # cells so they're all drawn + highlighted (else only the ~1% in the sketch show).
-        base = np.asarray(vp["overview_draw_order"])
-        aug = np.unique(np.concatenate([base, np.fromiter(sel, dtype=np.int64)]))
+        ov = np.asarray(vp["overview_draw_order"])
+        aug = np.unique(np.concatenate([ov, np.fromiter(sel, dtype=np.int64)]))
         data = vp["data"]
-        sub = data[aug] if hasattr(data, "obs") else data.iloc[aug]
-        extra = {"max_points": None}            # keep ALL selected (don't re-subsample)
-        if xr and xr[0] is not None:
-            extra["xrange"] = vp["xrange"]; extra["yrange"] = vp["yrange"]
-        if vp.get("point_size") is not None:
-            extra["point_size"] = vp["point_size"]
-        if vp.get("vmin") is not None:
-            extra["vmin"] = vp["vmin"]; extra["vmax"] = vp["vmax"]
-        if vp.get("categories") is not None:
-            extra["_color_categories"] = vp["categories"]
-        w2 = scatterplot(sub, **{**vp["base"], **extra}, **vp["bk"])
+        w2 = _build_detail(vp, aug, None)       # keep ALL selected (don't re-subsample)
         do = w2._draw_order
         orig = aug if do is None else aug[np.asarray(do)]
         widget._inv_draw_order = None
@@ -150,19 +177,7 @@ def _viewport_payload(widget, bounds, pad=0.6, seq=None):
         _r = np.random.RandomState(0)
         in_idx = np.sort(_r.choice(in_idx, budget * 3, replace=False))
     data = vp["data"]
-    sub = data[in_idx] if hasattr(data, "obs") else data.iloc[in_idx]
-    extra = {"max_points": vp["budget"]}
-    if xr and xr[0] is not None:                   # keep the overview domain
-        extra["xrange"] = vp["xrange"]
-        extra["yrange"] = vp["yrange"]
-    if vp.get("point_size") is not None:           # keep size constant
-        extra["point_size"] = vp["point_size"]
-    if vp.get("vmin") is not None:                 # keep the colour scale constant
-        extra["vmin"] = vp["vmin"]
-        extra["vmax"] = vp["vmax"]
-    if vp.get("categories") is not None:           # keep categorical colours/codes constant
-        extra["_color_categories"] = vp["categories"]
-    w2 = scatterplot(sub, **{**vp["base"], **extra}, **vp["bk"])
+    w2 = _build_detail(vp, in_idx, vp["budget"])
     do = w2._draw_order
     orig = in_idx if do is None else in_idx[np.asarray(do)]
     widget._inv_draw_order = None
@@ -586,13 +601,17 @@ def scatterplot(
     height: int = 500,
     backend: str = "regl",
     interactive: bool = False,
-    fast: bool = False,             # experimental: binary transfer (implies interactive)
-    progressive: bool = False,      # experimental: density-sketch overview + full detail as you zoom in
-    detail_on_zoom: bool = False,   # internal: emit viewport messages so the kernel re-renders in-view cells
-    overscan: float = 0.6,          # progressive: fetch this fraction of margin around the view (fewer = lighter pan, more hard cuts)
-    detail_max_points: Optional[int] = None,  # progressive: max points per detail viewport (fewer = smoother pan); None = use max_points/500k
-    performance_mode: Optional[bool] = None,  # squares+no-blend (faster) vs round circles; None=auto (n>500k), forced on for progressive unless set False
+    progressive: bool = False,      # density-sketch overview + full detail as you zoom in (for >~4M points)
+    progressive_opts: Optional[dict] = None,  # tuning: {"detail_max_points": int, "overscan": float}
+    _fast: bool = False,            # internal: binary channel transfer (auto for live regl widgets)
+    _detail_on_zoom: bool = False,  # internal: emit viewport messages so the kernel re-renders in-view cells
+    _performance_mode: Optional[bool] = None,  # internal: squares+no-blend; None=auto (n>500k / progressive)
     _color_categories=None,         # internal: pin the full categorical level set (detail-on-zoom colour consistency)
+    _pd_data: Any = None,           # internal: pre-extracted PlotData (skip extract on each detail-on-zoom viewport)
+    _size_values: Any = _UNSET,     # internal: pre-resolved size channel (skip _resolve_numeric)
+    _opacity_values: Any = _UNSET,  # internal: pre-resolved opacity channel
+    _tooltip_cols: Any = _UNSET,    # internal: pre-resolved tooltip dict
+    _filter_df: Any = _UNSET,       # internal: pre-sliced filter DataFrame
     show: bool = True,
     **backend_kwargs: Any,
 ):
@@ -633,6 +652,25 @@ def scatterplot(
     filter_by
         A dict / DataFrame of numeric columns shown as interactive range
         filters.
+    max_points
+        Cap on points actually drawn (huge data stays interactive). ``"auto"``
+        (default) caps at 500k via a density-preserving subsample; ``None`` draws
+        every point (ABC-Atlas style, smooth to ~4M); an int sets a custom cap.
+        The plot is captioned ``"X of Y shown"`` and an automatic cap warns once.
+    subsample
+        ``"density"`` (default, atlas-safe: keeps rare cells) or ``"random"``.
+    interactive
+        ``True`` returns the live, kernel-linked widget (needed for
+        ``w.selection`` / ``subset`` / ``annotate`` / linked ``compose``).
+        The default is a self-contained static snapshot.
+    progressive
+        For datasets beyond ~4M: show a density-sketch overview and re-render all
+        cells inside the viewport as you zoom in (detail-on-zoom, no
+        preprocessing). Always uses the live widget.
+    progressive_opts
+        Tuning dict for ``progressive``: ``detail_max_points`` (max points per
+        zoomed-in viewport; default ``max_points``/500k) and ``overscan``
+        (fraction of margin fetched around the view; default ``0.6``).
     backend
         ``"regl"`` (default) renders the package's own widget; ``"jscatter"``
         uses jupyter-scatter.
@@ -650,18 +688,51 @@ def scatterplot(
     ``save`` — and the original names (``color_by``, ``point_size``,
     ``continuous_palette``, ``categorical_palette``, ``dims`` …) keep working.
     """
-    # `detail_on_zoom` is the INTERNAL engine behind `progressive=` (it wires up
-    # the viewport round-trip). A user passing it directly — without progressive —
-    # gets viewport messages with no handler, i.e. an endless spinner. Promote it
-    # to `progressive=True`. `plot_id` is set only by the internal overview
-    # recursion, which must NOT re-enter this guard (would recurse forever).
-    if detail_on_zoom and not progressive and plot_id is None:
-        progressive = True
-        detail_on_zoom = False
+    # Back-compat: a few args were made internal / folded into progressive_opts.
+    # The old top-level names now land in **backend_kwargs; accept them (with a
+    # deprecation warning) instead of letting them vanish silently into the backend.
+    _DEPRECATED = ("fast", "detail_on_zoom", "performance_mode",
+                   "detail_max_points", "overscan")
+    _dep = {k: backend_kwargs.pop(k) for k in _DEPRECATED if k in backend_kwargs}
+    if _dep:
+        import warnings
+        warnings.warn(
+            "These scatterplot() arguments changed: 'fast'/'performance_mode'/"
+            "'detail_on_zoom' are now internal, and 'detail_max_points'/'overscan' "
+            "moved into progressive_opts={'detail_max_points': ..., 'overscan': ...}. "
+            "The old names still work for now but are deprecated.",
+            DeprecationWarning, stacklevel=2,
+        )
+        if "fast" in _dep:
+            _fast = bool(_dep["fast"])
+        if "detail_on_zoom" in _dep:
+            _detail_on_zoom = bool(_dep["detail_on_zoom"])
+        if "performance_mode" in _dep:
+            _performance_mode = _dep["performance_mode"]
+        if "detail_max_points" in _dep:
+            progressive_opts = {**(progressive_opts or {}),
+                                "detail_max_points": _dep["detail_max_points"]}
+        if "overscan" in _dep:
+            progressive_opts = {**(progressive_opts or {}), "overscan": _dep["overscan"]}
 
+    # `_detail_on_zoom` is the INTERNAL engine behind `progressive=` (it wires up
+    # the viewport round-trip). A user reaching it directly — without progressive —
+    # would get viewport messages with no handler, i.e. an endless spinner. Promote
+    # it to `progressive=True`. `plot_id` is set only by the internal overview
+    # recursion, which must NOT re-enter this guard (would recurse forever).
+    if _detail_on_zoom and not progressive and plot_id is None:
+        progressive = True
+        _detail_on_zoom = False
+
+    del _DEPRECATED, _dep
     # snapshot the call args up front so progressive mode can re-render the FULL
     # data through this exact same pipeline (keeps lasso/filter/tooltip identical)
     _params = {k: v for k, v in locals().items() if k != "data"}
+
+    # progressive tuning knobs (folded into one dict to keep the signature lean)
+    _popts = progressive_opts or {}
+    _detail_max_points = _popts.get("detail_max_points")
+    _overscan = float(_popts.get("overscan", 0.6))
 
     # --- scanpy-style aliases win over the original names when given --------
     if color is not _UNSET:
@@ -682,7 +753,7 @@ def scatterplot(
     _auto_max = (max_points == "auto")
     if _auto_max:
         max_points = _DEFAULT_MAX_POINTS   # smooth by default; pass max_points=None for all points
-    if fast:
+    if _fast:
         interactive = True   # binary transfer rides the live comm; needs a widget
     if pixel_ratio is not None and pixel_ratio < 1:
         import warnings
@@ -707,7 +778,7 @@ def scatterplot(
         # re-render ALL cells inside the viewport as you zoom in (the view holds few
         # cells when zoomed, so we can draw them all -> full detail + complete lasso,
         # with NO preprocessing). Shared plotId so each re-render replaces the plot.
-        budget = (detail_max_points if (isinstance(detail_max_points, int) and detail_max_points)
+        budget = (_detail_max_points if (isinstance(_detail_max_points, int) and _detail_max_points)
                   else (max_points if (isinstance(max_points, int) and max_points)
                         else _DEFAULT_MAX_POINTS))
         # A lighter overview re-renders fast on zoom-out (the heaviest refresh);
@@ -719,13 +790,19 @@ def scatterplot(
         # message and be applied via plot.draw (no _spec change -> no re-render).
         base = {**_params, "progressive": False, "interactive": True, "show": False,
                 "save": None,   # save once on the final widget, not the overview recursion
-                "fast": True, "plot_id": pid, "detail_on_zoom": True}   # binary channels
+                "_fast": True, "plot_id": pid, "_detail_on_zoom": True}   # binary channels
         w = scatterplot(data, **{**base, "max_points": overview_budget}, **bk)   # overview
         try:
             _io = _is_anndata(data) or _is_mudata(data) or _is_spatialdata(data)
             _eff = basis if (_io and basis is not None) else x
-            _full = extract(data, x=_eff, y=y, color_by=color_by, layer=layer,
-                            use_raw=use_raw, dims=dims, table=table)
+            _full = extract(data, x=_eff, y=y, color_by=color_by, group_by=group_by,
+                            layer=layer, use_raw=use_raw, dims=dims, table=table)
+            # pre-resolve the other per-point channels ONCE so each viewport just
+            # numpy-indexes them (no AnnData re-slice / re-resolution per zoom).
+            _full_size = _resolve_numeric(size_by, data, layer, "size_by", use_raw)
+            _full_opacity = _resolve_numeric(opacity_by, data, layer, "opacity_by", use_raw)
+            _full_tooltip = _resolve_cols(tooltip_by, data)
+            _full_filter = None if filter_by is None else pd.DataFrame(filter_by)
             _lg = w._spec.get("legend") or {}
             _fx = np.asarray(_full.x, "float64")
             _fy = np.asarray(_full.y, "float64")
@@ -738,6 +815,11 @@ def scatterplot(
                 _clevels = [str(c) for c in _ccat.categories]
             w._vp = {"data": data, "base": base, "bk": bk, "budget": budget,
                      "x": _fx, "y": _fy,
+                     # full pre-extracted channels -> each viewport numpy-indexes
+                     # these instead of re-slicing the AnnData + re-resolving color.
+                     "full_pd": _full, "full_size": _full_size,
+                     "full_opacity": _full_opacity, "full_tooltip": _full_tooltip,
+                     "full_filter": _full_filter,
                      "grid": None,   # built in a background thread (below) so it
                                      # doesn't delay first paint; full-scan until ready
 
@@ -755,7 +837,7 @@ def scatterplot(
                      # the JS caches the overview buffers; zoom-out just asks it to
                      # redraw them. Track state to skip redundant redraws on pan.
                      "showing_overview": True,
-                     "pad": float(overscan),   # overscan margin (tunable)
+                     "pad": float(_overscan),   # overscan margin (tunable)
                      # legend-filter sync across linked panels (original-cell based)
                      "color_codes": _ccodes, "color_levels": _clevels,
                      "filter_keep": None, "group": None,
@@ -804,9 +886,9 @@ def scatterplot(
                 stacklevel=2,
             )
             try:
-                snap = scatterplot(data, **{**base, "fast": False,
+                snap = scatterplot(data, **{**base, "_fast": False,
                                             "interactive": False,
-                                            "detail_on_zoom": False,
+                                            "_detail_on_zoom": False,
                                             "max_points": overview_budget}, **bk)
                 _maybe_save(snap, save)
             except Exception:
@@ -845,8 +927,7 @@ def scatterplot(
                 center_zero=center_zero, na_color=na_color, groups=groups,
                 sort_order=sort_order, random_state=random_state, max_points=max_points,
                 subsample=subsample,
-                progressive=progressive, detail_max_points=detail_max_points,
-                overscan=overscan,
+                progressive=progressive, progressive_opts=progressive_opts,
                 title=(title or name), xlab=xlab, ylab=ylab,
                 legend_title=legend_title, show_axes=show_axes,
                 show_tooltip=show_tooltip, background_color=background_color,
@@ -869,18 +950,24 @@ def scatterplot(
         return grid
 
     # --- resolve the effective embedding (basis is preferred; x is alias) ---
-    is_object = _is_anndata(data) or _is_mudata(data) or _is_spatialdata(data)
-    if basis is not None and not is_object:
-        raise ValueError(
-            "basis= applies to AnnData/MuData/SpatialData inputs; for a "
-            "DataFrame/array use x=/y= column selectors."
-        )
-    eff_x = basis if (is_object and basis is not None) else x
+    if _pd_data is not None:
+        # detail-on-zoom fast path: channels were pre-extracted once and are
+        # indexed per viewport (skips re-slicing the AnnData + re-resolving color,
+        # the dominant per-viewport cost on big sparse atlases).
+        pd_data = _pd_data
+    else:
+        is_object = _is_anndata(data) or _is_mudata(data) or _is_spatialdata(data)
+        if basis is not None and not is_object:
+            raise ValueError(
+                "basis= applies to AnnData/MuData/SpatialData inputs; for a "
+                "DataFrame/array use x=/y= column selectors."
+            )
+        eff_x = basis if (is_object and basis is not None) else x
 
-    pd_data: PlotData = extract(
-        data, x=eff_x, y=y, color_by=color_by, group_by=group_by,
-        layer=layer, use_raw=use_raw, dims=dims, table=table,
-    )
+        pd_data: PlotData = extract(
+            data, x=eff_x, y=y, color_by=color_by, group_by=group_by,
+            layer=layer, use_raw=use_raw, dims=dims, table=table,
+        )
 
     # adaptive defaults, matching the R heuristics
     n = pd_data.n
@@ -906,9 +993,14 @@ def scatterplot(
         raise _not_found("continuous_palette", continuous_palette,
                          list(CONTINUOUS), searched="built-in continuous palettes")
 
-    size_values = _resolve_numeric(size_by, data, layer, "size_by", use_raw)
-    opacity_values = _resolve_numeric(opacity_by, data, layer, "opacity_by", use_raw)
-    tooltip_cols = _resolve_cols(tooltip_by, data)
+    size_values = (_resolve_numeric(size_by, data, layer, "size_by", use_raw)
+                   if _size_values is _UNSET else _size_values)
+    opacity_values = (_resolve_numeric(opacity_by, data, layer, "opacity_by", use_raw)
+                      if _opacity_values is _UNSET else _opacity_values)
+    tooltip_cols = (_resolve_cols(tooltip_by, data)
+                    if _tooltip_cols is _UNSET else _tooltip_cols)
+    if _filter_df is not _UNSET:
+        filter_by = _filter_df   # pre-sliced to the in-view cells
     for pname, vec in (("size_by", size_values), ("opacity_by", opacity_values)):
         if vec is not None and len(vec) != n:
             raise ValueError(
@@ -962,15 +1054,15 @@ def scatterplot(
         enable_download=enable_download, font_size=font_size,
         legend_font_size=legend_font_size, auto_fit=auto_fit,
         point_labels=point_labels, plot_id=plot_id, filter_by=filter_by,
-        binary=fast,
+        binary=_fast,
     )
-    if detail_on_zoom:
+    if _detail_on_zoom:
         spec["detailOnZoom"] = True   # client emits viewport msgs -> kernel re-renders in-view cells
         # squares + no alpha-blend are much cheaper per draw; default on for the
-        # zoom loop, but honour an explicit performance_mode=False (round circles).
-        spec["performanceMode"] = True if performance_mode is None else bool(performance_mode)
-    elif performance_mode is not None:
-        spec["performanceMode"] = bool(performance_mode)
+        # zoom loop, but honour an explicit _performance_mode=False (round circles).
+        spec["performanceMode"] = True if _performance_mode is None else bool(_performance_mode)
+    elif _performance_mode is not None:
+        spec["performanceMode"] = bool(_performance_mode)
 
     # Be honest about subsampling: caption the plot ("X of Y shown") and, when the
     # downsample was automatic (not user-requested), warn — so a subsampled plot is
@@ -978,7 +1070,7 @@ def scatterplot(
     _rendered = n if draw_order is None else int(np.asarray(draw_order).size)
     if _rendered < n:
         spec["caption"] = f"{_rendered:,} of {n:,} shown"
-        if _auto_max and not detail_on_zoom:
+        if _auto_max and not _detail_on_zoom:
             import warnings
             warnings.warn(
                 f"Showing a {_rendered:,}-point density-preserving subsample of "

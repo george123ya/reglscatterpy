@@ -91,12 +91,17 @@ rs.scatterplot(adata, basis="umap", color_by="cell_type", progressive=True)
 It shows a light density-sketch overview, then re-renders **all cells inside the
 viewport** as you zoom in (a zoomed view holds few cells, so they draw at full
 detail with a complete lasso). The camera domain stays fixed and the overview
-snaps back instantly on zoom-out. Knobs:
+snaps back instantly on zoom-out. Tune it with `progressive_opts`:
 
-- `detail_max_points=N` — max points per zoomed-in viewport (lower = smoother
-  pan; defaults to `max_points`/500k).
-- `overscan=0.6` — fraction of margin fetched around the view, so panning has no
-  hard cuts (lower = lighter pan, more visible edges).
+```python
+rs.scatterplot(adata, basis="umap", color_by="cell_type", progressive=True,
+               progressive_opts={"detail_max_points": 300_000, "overscan": 0.6})
+```
+
+- `detail_max_points` — max points per zoomed-in viewport (lower = smoother pan;
+  defaults to `max_points`/500k).
+- `overscan` — fraction of margin fetched around the view, so panning has no hard
+  cuts (lower = lighter pan, more visible edges; default `0.6`).
 
 Rule of thumb: `max_points=None` for ~2–4M real atlases; `progressive=True` only
 beyond that. `progressive=True` always uses the live (interactive) widget.
