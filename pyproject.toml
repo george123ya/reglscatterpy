@@ -46,6 +46,10 @@ Homepage = "https://github.com/george123ya/reglscatterpy"
 "Bug Tracker" = "https://github.com/george123ya/reglscatterpy/issues"
 "R package" = "https://github.com/george123ya/reglScatterplotR"
 
+[tool.hatch.build.targets.sdist]
+# data-raw holds dev-only sources + (untracked) huge .h5ad test dumps; never ship them.
+exclude = ["/data-raw", "*.h5ad"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/reglscatterpy"]
 # Ship the compiled anywidget bundle (its JS source lives in the reglScatterplotR

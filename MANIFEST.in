@@ -1,2 +1,0 @@
-prune data-raw
-global-exclude *.h5ad
