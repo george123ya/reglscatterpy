@@ -323,10 +323,15 @@ def scatterplot(
 
     # --- progressive: subset now (instant), full streamed in the background ---
     if progressive and not _is_name_list(color_by) and backend == "regl":
+        import uuid
         interactive = True
         sub_n = int(max_points) if max_points else 150_000
+        # shared plotId so the full re-render DESTROYS the subset plot (else its
+        # render loop leaks and two loops thrash the CPU).
+        pid = plot_id or ("rs_" + uuid.uuid4().hex[:10])
         bk = dict(_params.pop("backend_kwargs", {}) or {})
-        base = {**_params, "progressive": False, "interactive": True, "show": False, "fast": True}
+        base = {**_params, "progressive": False, "interactive": True, "show": False,
+                "fast": True, "plot_id": pid}
         # instant first paint from a representative subset
         w = scatterplot(data, **{**base, "max_points": sub_n}, **bk)
         if w._spec.get("n_points", 0) >= sub_n:   # there's more -> stream the full set after
@@ -336,7 +341,7 @@ def scatterplot(
                     _w._inv_draw_order = None
                     _w._draw_order = full._draw_order
                     _w._source = full._source
-                    _w._spec = full._spec     # re-renders with all points
+                    _w._spec = full._spec     # re-renders (same plotId) with all points
                 except Exception:
                     pass
             import threading
