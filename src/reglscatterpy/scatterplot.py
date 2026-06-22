@@ -80,6 +80,7 @@ def _viewport_payload(widget, bounds, pad=0.6):
         if vp.get("showing_overview"):
             return                              # already at overview -> no redundant redraw
         vp["showing_overview"] = True
+        vp["last_fetch"] = None                 # so the next zoom-in re-fetches detail
         widget._inv_draw_order = None
         widget._draw_order = vp["overview_draw_order"]
         widget._source = vp["data"]
@@ -87,6 +88,16 @@ def _viewport_payload(widget, bounds, pad=0.6):
                      "select": _sel_positions(vp.get("sel"), vp["overview_draw_order"])})
         return
     vp["showing_overview"] = False
+    # Skip the round-trip if the new view is still inside the region we last fetched
+    # (a pan within the overscan margin) and we haven't zoomed in enough to need denser
+    # detail — the points are already on screen, so re-fetching just causes flicker/lag.
+    _vspan = x1 - x0
+    lf = vp.get("last_fetch")
+    if lf is not None:
+        px0, py0, px1, py1, lspan = lf
+        if (x0 >= px0 and x1 <= px1 and y0 >= py0 and y1 <= py1
+                and _vspan >= 0.85 * lspan):
+            return
     dx, dy = (x1 - x0) * pad, (y1 - y0) * pad      # overscan margin
     x0, x1, y0, y1 = x0 - dx, x1 + dx, y0 - dy, y1 + dy
     fx, fy = vp["x"], vp["y"]
@@ -124,6 +135,7 @@ def _viewport_payload(widget, bounds, pad=0.6):
     # to the new in-view positions so it follows the same cells.
     _msg = _vp_channels(w2._spec)
     _msg["select"] = _sel_positions(vp.get("sel"), orig)
+    vp["last_fetch"] = (x0, y0, x1, y1, _vspan)    # padded region + the view span we fetched at
     widget.send(_msg)
 
 
