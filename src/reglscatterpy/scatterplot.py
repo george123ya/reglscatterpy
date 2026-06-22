@@ -57,7 +57,7 @@ def _is_name_list(spec) -> bool:
     )
 
 
-def _viewport_payload(widget, bounds, pad=0.6):
+def _viewport_payload(widget, bounds, pad=0.6, seq=None):
     """Re-render the cells inside the current view (detail-on-zoom). Zoomed in,
     the viewport holds few cells so we draw them ALL (full detail + complete
     lasso); zoomed out it falls back to the density budget. Maps the rendered
@@ -84,7 +84,7 @@ def _viewport_payload(widget, bounds, pad=0.6):
         widget._inv_draw_order = None
         widget._draw_order = vp["overview_draw_order"]
         widget._source = vp["data"]
-        widget.send({"type": "vp_overview",     # JS redraws its cached overview buffers
+        widget.send({"type": "vp_overview", "seq": seq,   # JS redraws cached overview
                      "select": _sel_positions(vp.get("sel"), vp["overview_draw_order"])})
         return
     vp["showing_overview"] = False
@@ -135,6 +135,7 @@ def _viewport_payload(widget, bounds, pad=0.6):
     # to the new in-view positions so it follows the same cells.
     _msg = _vp_channels(w2._spec)
     _msg["select"] = _sel_positions(vp.get("sel"), orig)
+    _msg["seq"] = seq
     vp["last_fetch"] = (x0, y0, x1, y1, _vspan)    # padded region + the view span we fetched at
     widget.send(_msg)
 
@@ -239,7 +240,7 @@ def _viewport_handler(widget, content, buffers):
             return
         t = content.get("type")
         if t == "viewport":
-            _viewport_payload(widget, content["bounds"])
+            _viewport_payload(widget, content["bounds"], seq=content.get("seq"))
         elif t == "lasso":
             _lasso_payload(widget, content.get("polygon"))
     except Exception:
