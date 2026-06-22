@@ -788,6 +788,8 @@ def scatterplot(
                 center_zero=center_zero, na_color=na_color, groups=groups,
                 sort_order=sort_order, random_state=random_state, max_points=max_points,
                 subsample=subsample,
+                progressive=progressive, detail_max_points=detail_max_points,
+                overscan=overscan,
                 title=(title or name), xlab=xlab, ylab=ylab,
                 legend_title=legend_title, show_axes=show_axes,
                 show_tooltip=show_tooltip, background_color=background_color,
