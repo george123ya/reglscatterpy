@@ -82,7 +82,8 @@ def _viewport_payload(widget, bounds, pad=0.6):
         widget._inv_draw_order = None
         widget._draw_order = vp["overview_draw_order"]
         widget._source = vp["data"]
-        widget.send({"type": "vp_overview"})    # JS redraws its cached overview buffers
+        widget.send({"type": "vp_overview",     # JS redraws its cached overview buffers
+                     "select": _sel_positions(vp.get("sel"), vp["overview_draw_order"])})
         return
     vp["showing_overview"] = False
     dx, dy = (x1 - x0) * pad, (y1 - y0) * pad      # overscan margin
@@ -110,8 +111,11 @@ def _viewport_payload(widget, bounds, pad=0.6):
     widget._draw_order = orig
     widget._source = data                          # keep selection/DE on the full object
     # Swap points on the EXISTING plot (custom message -> plot.draw); never touches
-    # _spec, so no re-mount / spinner / plot recreation.
-    widget.send(_vp_channels(w2._spec))
+    # _spec, so no re-mount / spinner / plot recreation. Re-map the persisted lasso
+    # to the new in-view positions so it follows the same cells.
+    _msg = _vp_channels(w2._spec)
+    _msg["select"] = _sel_positions(vp.get("sel"), orig)
+    widget.send(_msg)
 
 
 def _vp_channels(spec):
@@ -120,6 +124,15 @@ def _vp_channels(spec):
             "x": spec.get("x"), "y": spec.get("y"), "z": spec.get("z"),
             "w": spec.get("w"), "group_data": spec.get("group_data"),
             "n_points": spec.get("n_points")}
+
+
+def _sel_positions(sel, draw_order):
+    """Map a logical (original-index) selection to positions in a draw order, so a
+    persisted lasso re-highlights the SAME cells after a viewport swap."""
+    if not sel or draw_order is None:
+        return []
+    inv = {int(o): p for p, o in enumerate(np.asarray(draw_order))}
+    return [inv[o] for o in sel if o in inv]
 
 
 def _viewport_handler(widget, content, buffers):
@@ -481,8 +494,28 @@ def scatterplot(
                      # the JS caches the overview buffers; zoom-out just asks it to
                      # redraw them. Track state to skip redundant redraws on pan.
                      "showing_overview": True,
+                     # logical lasso (ORIGINAL indices) so it persists across zoom;
+                     # updated only by real user lassos (re-applies use msg.select,
+                     # which never touches the _selection trait -> no observer fire).
+                     "sel": set(),
                      "overview_draw_order": w._draw_order}
             w.on_msg(_viewport_handler)
+
+            def _on_user_sel(change, _w=w):
+                vp = getattr(_w, "_vp", None)
+                if vp is None or vp.get("_setting"):
+                    return
+                try:
+                    do = _w._draw_order
+                    pos = change.get("new") or []
+                    if do is not None:
+                        od = np.asarray(do)
+                        vp["sel"] = {int(od[p]) for p in pos if 0 <= p < od.size}
+                    else:
+                        vp["sel"] = {int(p) for p in pos}
+                except Exception:
+                    pass
+            w.observe(_on_user_sel, names="_selection")
         except Exception:
             pass
         return w

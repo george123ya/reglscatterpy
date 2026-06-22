@@ -63,6 +63,11 @@ def _make_classes():
             Live (``interactive=True``) only — on a static plot this stays empty
             because there is no kernel link.
             """
+            # detail-on-zoom keeps the logical selection (original indices) so it
+            # survives viewport swaps; prefer it when present.
+            vp = getattr(self, "_vp", None)
+            if vp is not None and "sel" in vp:
+                return sorted(int(i) for i in vp["sel"])
             sel = list(self._selection)
             perm = getattr(self, "_draw_order", None)
             if perm is not None:
@@ -80,8 +85,19 @@ def _make_classes():
                     # most originals, so use a dict and drop the not-rendered ones.
                     inv = {int(o): p for p, o in enumerate(perm)}
                     self._inv_draw_order = inv
-                idx = [inv[d] for d in idx if d in inv]
-            self._selection = idx
+                positions = [inv[d] for d in idx if d in inv]
+            else:
+                positions = idx
+            vp = getattr(self, "_vp", None)
+            if vp is not None and "sel" in vp:
+                vp["_setting"] = True          # don't let the observer shrink it to in-view
+                vp["sel"] = set(idx)
+                try:
+                    self._selection = positions
+                finally:
+                    vp["_setting"] = False
+            else:
+                self._selection = positions
 
         def subset(self, selection=None):
             """The source object subset to the selected cells (``adata[w.selection]``)."""
