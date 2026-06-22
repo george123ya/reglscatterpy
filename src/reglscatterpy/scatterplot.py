@@ -210,9 +210,20 @@ def _vp_send(widget, spec, select, seq, keep=None):
 
 
 def _keep_positions(vp, draw_order):
-    """Filter-keep positions for the current draw order (None = no active filter)."""
-    fk = vp.get("filter_keep")
-    return None if fk is None else _sel_positions(fk, draw_order)
+    """Legend-filter keep positions for the current draw order (None = no filter).
+
+    ``filter_keep`` is a numpy array of ORIGINAL cells to keep (set once from the
+    filtered panel's codes — works cross-variable). Each panel maps it to its own
+    displayed positions with a vectorised ``np.isin`` over the ~cells-in-view draw
+    order — no Python set of millions, no per-element dict lookups (the old version
+    of both was why legend filtering felt slow on 20M-cell atlases)."""
+    ko = vp.get("filter_keep")
+    if ko is None:
+        return None
+    do = vp.get("overview_draw_order") if draw_order is None else draw_order
+    if do is None:
+        return None
+    return np.where(np.isin(np.asarray(do), ko))[0].tolist()
 
 
 _INV_CACHE = {}  # id(draw_order) -> (draw_order_ref, {original_index: position})
@@ -337,19 +348,22 @@ def _legend_filter_payload(widget, cats):
     if codes is None or levels is None:
         return
     if not cats:
-        keep = None                                  # cleared -> show all
+        keep_orig = None                             # cleared -> show all
     else:
         want = {str(c) for c in cats}
-        sel_codes = [i for i, lv in enumerate(levels) if lv in want]
-        keep = {int(i) for i in np.where(np.isin(codes, sel_codes))[0]}
+        sel_codes = np.array([i for i, lv in enumerate(levels) if lv in want],
+                             dtype=np.int64)
+        # ORIGINAL cells to keep, as a numpy array (NOT a Python set of millions).
+        keep_orig = np.where(np.isin(np.asarray(codes), sel_codes))[0]
+    # share the same original-cell keep across linked panels; each maps it to its
+    # own displayed cells via vectorised isin (cross-variable + fast).
     for panel in (vp.get("group") or [widget]):
         pvp = getattr(panel, "_vp", None)
         if pvp is None:
             continue
-        pvp["filter_keep"] = keep
+        pvp["filter_keep"] = keep_orig
         panel.send({"type": "vp_filter",
-                    "keep": (None if keep is None
-                             else _sel_positions(keep, panel._draw_order))})
+                    "keep": _keep_positions(pvp, panel._draw_order)})
 
 
 def _viewport_handler(widget, content, buffers):
@@ -358,6 +372,22 @@ def _viewport_handler(widget, content, buffers):
             return
         t = content.get("type")
         if t == "viewport":
+            if content.get("reset"):
+                # double-click reset clears the selection too (matches the client
+                # deselect); drop the persisted lasso so the snap-back overview
+                # doesn't re-draw/re-highlight stale cells. Propagate to ALL linked
+                # panels (a reset on one panel resets the group).
+                vp = getattr(widget, "_vp", None)
+                if vp is not None:
+                    for _panel in (vp.get("group") or [widget]):
+                        _pvp = getattr(_panel, "_vp", None)
+                        if _pvp is not None:
+                            _pvp["sel"] = set()
+                        if _panel is not widget:
+                            try:
+                                _panel.send({"type": "vp_select", "select": []})
+                            except Exception:
+                                pass
             _viewport_payload(widget, content["bounds"], seq=content.get("seq"))
         elif t == "lasso":
             _lasso_payload(widget, content.get("polygon"))
