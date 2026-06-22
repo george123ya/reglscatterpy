@@ -57,6 +57,43 @@ def _is_name_list(spec) -> bool:
     )
 
 
+def _viewport_payload(widget, bounds):
+    """Re-render the cells inside the current view (detail-on-zoom). Zoomed in,
+    the viewport holds few cells so we draw them ALL (full detail + complete
+    lasso); zoomed out it falls back to the density budget. Maps the rendered
+    indices back to ORIGINAL rows so w.selection stays correct."""
+    vp = getattr(widget, "_vp", None)
+    if not vp:
+        return
+    x0, y0, x1, y1 = (float(b) for b in bounds)
+    fx, fy = vp["x"], vp["y"]
+    mask = (fx >= x0) & (fx <= x1) & (fy >= y0) & (fy <= y1)
+    in_idx = np.where(mask)[0]
+    if in_idx.size == 0:
+        return
+    data = vp["data"]
+    sub = data[mask] if hasattr(data, "obs") else data.iloc[in_idx]
+    extra = {"max_points": vp["budget"]}
+    if vp.get("xrange") and vp["xrange"][0] is not None:   # keep the overview domain
+        extra["xrange"] = vp["xrange"]
+        extra["yrange"] = vp["yrange"]
+    w2 = scatterplot(sub, **{**vp["base"], **extra}, **vp["bk"])
+    do = w2._draw_order
+    orig = in_idx if do is None else in_idx[np.asarray(do)]
+    widget._inv_draw_order = None
+    widget._draw_order = orig
+    widget._source = data           # keep selection/DE on the full object
+    widget._spec = w2._spec         # re-renders (same plotId), camera preserved
+
+
+def _viewport_handler(widget, content, buffers):
+    try:
+        if isinstance(content, dict) and content.get("type") == "viewport":
+            _viewport_payload(widget, content["bounds"])
+    except Exception:
+        pass
+
+
 def _maybe_save(obj, save):
     """scanpy-style ``save=``: write the plot to a file. ``.html`` is supported
     programmatically (self-contained); image formats need the in-plot button."""
@@ -285,7 +322,8 @@ def scatterplot(
     backend: str = "regl",
     interactive: bool = False,
     fast: bool = False,             # experimental: binary transfer (implies interactive)
-    progressive: bool = False,      # experimental: render a subset instantly, stream the full set after
+    progressive: bool = False,      # experimental: density-sketch overview + full detail as you zoom in
+    detail_on_zoom: bool = False,   # internal: emit viewport messages so the kernel re-renders in-view cells
     show: bool = True,
     **backend_kwargs: Any,
 ):
@@ -372,27 +410,31 @@ def scatterplot(
     if progressive and not _is_name_list(color_by) and backend == "regl":
         import uuid
         interactive = True
-        sub_n = int(max_points) if max_points else 150_000
-        # shared plotId so the full re-render DESTROYS the subset plot (else its
-        # render loop leaks and two loops thrash the CPU).
+        # detail-on-zoom ("in-memory tiling"): show a density-sketch overview, then
+        # re-render ALL cells inside the viewport as you zoom in (the view holds few
+        # cells when zoomed, so we can draw them all -> full detail + complete lasso,
+        # with NO preprocessing). Shared plotId so each re-render replaces the plot.
+        budget = max_points if (isinstance(max_points, int) and max_points) else _DEFAULT_MAX_POINTS
         pid = plot_id or ("rs_" + uuid.uuid4().hex[:10])
         bk = dict(_params.pop("backend_kwargs", {}) or {})
         base = {**_params, "progressive": False, "interactive": True, "show": False,
-                "fast": True, "plot_id": pid}
-        # instant first paint from a representative subset
-        w = scatterplot(data, **{**base, "max_points": sub_n}, **bk)
-        if w._spec.get("n_points", 0) >= sub_n:   # there's more -> stream the full set after
-            def _stream(_w=w, _data=data, _base=base, _bk=bk):
-                try:
-                    full = scatterplot(_data, **{**_base, "max_points": None}, **_bk)
-                    _w._inv_draw_order = None
-                    _w._draw_order = full._draw_order
-                    _w._source = full._source
-                    _w._spec = full._spec     # re-renders (same plotId) with all points
-                except Exception:
-                    pass
-            import threading
-            threading.Timer(0.5, _stream).start()
+                "fast": True, "plot_id": pid, "detail_on_zoom": True}
+        w = scatterplot(data, **{**base, "max_points": budget}, **bk)   # overview
+        try:
+            _io = _is_anndata(data) or _is_mudata(data) or _is_spatialdata(data)
+            _eff = basis if (_io and basis is not None) else x
+            _full = extract(data, x=_eff, y=y, layer=layer, use_raw=use_raw,
+                            dims=dims, table=table)
+            w._vp = {"data": data, "base": base, "bk": bk, "budget": budget,
+                     "x": np.asarray(_full.x, "float64"),
+                     "y": np.asarray(_full.y, "float64"),
+                     # keep the overview's data domain so the preserved camera
+                     # still maps correctly when we re-render an in-view subset.
+                     "xrange": (w._spec.get("x_min"), w._spec.get("x_max")),
+                     "yrange": (w._spec.get("y_min"), w._spec.get("y_max"))}
+            w.on_msg(_viewport_handler)
+        except Exception:
+            pass
         return w
 
     # --- validate enum-ish arguments up front (fail before doing work) ------
@@ -549,6 +591,8 @@ def scatterplot(
         point_labels=point_labels, plot_id=plot_id, filter_by=filter_by,
         binary=fast,
     )
+    if detail_on_zoom:
+        spec["detailOnZoom"] = True   # client emits viewport msgs -> kernel re-renders in-view cells
 
     w = int(width) if width else 0   # 0 => responsive (100%)
     if interactive:
