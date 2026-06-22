@@ -36,6 +36,7 @@ from ._payload import build_payload
 __all__ = ["scatterplot"]
 
 _TOOLBAR_CHOICES = (None, "left", "top", "none")
+_DEFAULT_MAX_POINTS = 500_000   # auto-cap for smooth exploration of huge data
 
 
 class _Unset:
@@ -184,7 +185,7 @@ def scatterplot(
     groups: Any = None,             # show only these categories; grey the rest
     sort_order: bool = True,        # draw higher continuous values on top (scanpy)
     random_state: Optional[int] = None,  # seed -> random draw order (reduce overplotting)
-    max_points: Optional[int] = None,    # subsample to this many for smooth huge-data exploration
+    max_points: Any = "auto",            # subsample huge data for smooth exploration; "auto" caps at 500k, None = all points
     # --- original names (still supported as aliases) ------------------------
     basis: Optional[Union[str, int]] = None,
     x: Optional[Union[str, int]] = None,
@@ -318,6 +319,8 @@ def scatterplot(
         categorical_palette = palette
     if components is not _UNSET and components is not None:
         dims = tuple(int(c) - 1 for c in components)   # 1-based -> 0-based
+    if max_points == "auto":
+        max_points = _DEFAULT_MAX_POINTS   # smooth by default; pass max_points=None for all points
     if fast:
         interactive = True   # binary transfer rides the live comm; needs a widget
 
