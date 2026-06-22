@@ -407,7 +407,8 @@ def scatterplot(
         categorical_palette = palette
     if components is not _UNSET and components is not None:
         dims = tuple(int(c) - 1 for c in components)   # 1-based -> 0-based
-    if max_points == "auto":
+    _auto_max = (max_points == "auto")
+    if _auto_max:
         max_points = _DEFAULT_MAX_POINTS   # smooth by default; pass max_points=None for all points
     if fast:
         interactive = True   # binary transfer rides the live comm; needs a widget
@@ -599,6 +600,21 @@ def scatterplot(
     )
     if detail_on_zoom:
         spec["detailOnZoom"] = True   # client emits viewport msgs -> kernel re-renders in-view cells
+
+    # Be honest about subsampling: caption the plot ("X of Y shown") and, when the
+    # downsample was automatic (not user-requested), warn — so a subsampled plot is
+    # never mistaken for the full data.
+    _rendered = n if draw_order is None else int(np.asarray(draw_order).size)
+    if _rendered < n:
+        spec["caption"] = f"{_rendered:,} of {n:,} shown"
+        if _auto_max and not detail_on_zoom:
+            import warnings
+            warnings.warn(
+                f"Showing a {_rendered:,}-point density-preserving subsample of "
+                f"{n:,} points for smooth rendering (rare groups are kept). "
+                f"Pass max_points=None for all points, or set max_points=N.",
+                stacklevel=2,
+            )
 
     w = int(width) if width else 0   # 0 => responsive (100%)
     if interactive:

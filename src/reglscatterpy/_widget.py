@@ -211,9 +211,12 @@ def _make_classes():
         def __repr__(self):
             spec = getattr(self, "_spec", None) or {}
             n = spec.get("n_points")
+            cap = spec.get("caption")
             by = spec.get("colorVar") or spec.get("groupVar")
             bits = ["reglscatterpy plot"]
-            if n is not None:
+            if cap:
+                bits.append(cap)            # "X of Y shown" when subsampled
+            elif n is not None:
                 bits.append(f"{n:,} points")
             if by:
                 bits.append(f"color_by={by!r}")
