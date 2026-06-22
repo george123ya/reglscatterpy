@@ -57,15 +57,21 @@ def _is_name_list(spec) -> bool:
     )
 
 
-def _viewport_payload(widget, bounds):
+def _viewport_payload(widget, bounds, pad=0.6):
     """Re-render the cells inside the current view (detail-on-zoom). Zoomed in,
     the viewport holds few cells so we draw them ALL (full detail + complete
     lasso); zoomed out it falls back to the density budget. Maps the rendered
-    indices back to ORIGINAL rows so w.selection stays correct."""
+    indices back to ORIGINAL rows so w.selection stays correct.
+
+    ``pad`` overscans the fetched region by that fraction of the view span on
+    every side, so a pan within the margin doesn't expose empty 'hard cuts'
+    before the next refresh arrives."""
     vp = getattr(widget, "_vp", None)
     if not vp:
         return
     x0, y0, x1, y1 = (float(b) for b in bounds)
+    dx, dy = (x1 - x0) * pad, (y1 - y0) * pad      # overscan margin
+    x0, x1, y0, y1 = x0 - dx, x1 + dx, y0 - dy, y1 + dy
     fx, fy = vp["x"], vp["y"]
     mask = (fx >= x0) & (fx <= x1) & (fy >= y0) & (fy <= y1)
     in_idx = np.where(mask)[0]
