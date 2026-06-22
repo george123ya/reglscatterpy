@@ -436,11 +436,14 @@ def scatterplot(
         # cells when zoomed, so we can draw them all -> full detail + complete lasso,
         # with NO preprocessing). Shared plotId so each re-render replaces the plot.
         budget = max_points if (isinstance(max_points, int) and max_points) else _DEFAULT_MAX_POINTS
+        # A lighter overview re-renders fast on zoom-out (the heaviest refresh);
+        # zoom-in detail still uses the full budget.
+        overview_budget = min(budget, 250_000)
         pid = plot_id or ("rs_" + uuid.uuid4().hex[:10])
         bk = dict(_params.pop("backend_kwargs", {}) or {})
         base = {**_params, "progressive": False, "interactive": True, "show": False,
                 "fast": True, "plot_id": pid, "detail_on_zoom": True}
-        w = scatterplot(data, **{**base, "max_points": budget}, **bk)   # overview
+        w = scatterplot(data, **{**base, "max_points": overview_budget}, **bk)   # overview
         try:
             _io = _is_anndata(data) or _is_mudata(data) or _is_spatialdata(data)
             _eff = basis if (_io and basis is not None) else x
@@ -622,6 +625,7 @@ def scatterplot(
     )
     if detail_on_zoom:
         spec["detailOnZoom"] = True   # client emits viewport msgs -> kernel re-renders in-view cells
+        spec["performanceMode"] = True  # squares + no alpha-blend: much cheaper draws on every refresh
 
     # Be honest about subsampling: caption the plot ("X of Y shown") and, when the
     # downsample was automatic (not user-requested), warn — so a subsampled plot is
