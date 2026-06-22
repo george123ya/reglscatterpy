@@ -70,17 +70,16 @@ def _viewport_payload(widget, bounds, pad=0.6):
     if not vp:
         return
     x0, y0, x1, y1 = (float(b) for b in bounds)
-    # Zoomed back out to ~the full extent? Snap to the cached overview instantly
-    # (no recompute, no transfer) instead of rebuilding the whole-dataset sketch.
     xr, yr = vp.get("xrange"), vp.get("yrange")
-    if (xr and xr[0] is not None and vp.get("overview_spec") is not None
+    # Zoomed back out to ~the full extent? Push the cached overview channels
+    # instantly (no recompute, no rebuild) — and via plot.draw, not a re-render.
+    if (xr and xr[0] is not None
             and (x1 - x0) >= 0.9 * (xr[1] - xr[0])
             and (y1 - y0) >= 0.9 * (yr[1] - yr[0])):
-        if widget._spec is not vp["overview_spec"]:     # already showing it? do nothing
-            widget._inv_draw_order = None
-            widget._draw_order = vp["overview_draw_order"]
-            widget._source = vp["data"]
-            widget._spec = vp["overview_spec"]
+        widget._inv_draw_order = None
+        widget._draw_order = vp["overview_draw_order"]
+        widget._source = vp["data"]
+        widget.send(vp["overview_channels"])
         return
     dx, dy = (x1 - x0) * pad, (y1 - y0) * pad      # overscan margin
     x0, x1, y0, y1 = x0 - dx, x1 + dx, y0 - dy, y1 + dy
@@ -92,18 +91,31 @@ def _viewport_payload(widget, bounds, pad=0.6):
     data = vp["data"]
     sub = data[mask] if hasattr(data, "obs") else data.iloc[in_idx]
     extra = {"max_points": vp["budget"]}
-    if vp.get("xrange") and vp["xrange"][0] is not None:   # keep the overview domain
+    if xr and xr[0] is not None:                   # keep the overview domain
         extra["xrange"] = vp["xrange"]
         extra["yrange"] = vp["yrange"]
-    if vp.get("point_size") is not None:                   # keep size constant
+    if vp.get("point_size") is not None:           # keep size constant
         extra["point_size"] = vp["point_size"]
+    if vp.get("vmin") is not None:                 # keep the colour scale constant
+        extra["vmin"] = vp["vmin"]
+        extra["vmax"] = vp["vmax"]
     w2 = scatterplot(sub, **{**vp["base"], **extra}, **vp["bk"])
     do = w2._draw_order
     orig = in_idx if do is None else in_idx[np.asarray(do)]
     widget._inv_draw_order = None
     widget._draw_order = orig
-    widget._source = data           # keep selection/DE on the full object
-    widget._spec = w2._spec         # re-renders (same plotId), camera preserved
+    widget._source = data                          # keep selection/DE on the full object
+    # Swap points on the EXISTING plot (custom message -> plot.draw); never touches
+    # _spec, so no re-mount / spinner / plot recreation.
+    widget.send(_vp_channels(w2._spec))
+
+
+def _vp_channels(spec):
+    """The point channels to ship for an in-place plot.draw update."""
+    return {"type": "vp_update",
+            "x": spec.get("x"), "y": spec.get("y"), "z": spec.get("z"),
+            "w": spec.get("w"), "group_data": spec.get("group_data"),
+            "n_points": spec.get("n_points")}
 
 
 def _viewport_handler(widget, content, buffers):
@@ -441,28 +453,29 @@ def scatterplot(
         overview_budget = min(budget, 250_000)
         pid = plot_id or ("rs_" + uuid.uuid4().hex[:10])
         bk = dict(_params.pop("backend_kwargs", {}) or {})
+        # base64 channels (fast=False) so in-view updates can ship over a custom
+        # message and be applied via plot.draw (no _spec change -> no re-render).
         base = {**_params, "progressive": False, "interactive": True, "show": False,
-                "fast": True, "plot_id": pid, "detail_on_zoom": True}
+                "fast": False, "plot_id": pid, "detail_on_zoom": True}
         w = scatterplot(data, **{**base, "max_points": overview_budget}, **bk)   # overview
         try:
             _io = _is_anndata(data) or _is_mudata(data) or _is_spatialdata(data)
             _eff = basis if (_io and basis is not None) else x
             _full = extract(data, x=_eff, y=y, layer=layer, use_raw=use_raw,
                             dims=dims, table=table)
+            _lg = w._spec.get("legend") or {}
             w._vp = {"data": data, "base": base, "bk": bk, "budget": budget,
                      "x": np.asarray(_full.x, "float64"),
                      "y": np.asarray(_full.y, "float64"),
-                     # keep the overview's data domain so the preserved camera
-                     # still maps correctly when we re-render an in-view subset.
+                     # keep the overview's data domain so the camera stays put and
+                     # the in-view points land in the right place.
                      "xrange": (w._spec.get("x_min"), w._spec.get("x_max")),
                      "yrange": (w._spec.get("y_min"), w._spec.get("y_max")),
-                     # keep point size fixed across refreshes (the auto size grows
-                     # as the in-view subset shrinks, which looked like points
-                     # ballooning on every zoom).
+                     # keep point size + colour scale fixed across refreshes.
                      "point_size": (w._spec.get("options") or {}).get("size"),
-                     # cached overview so zooming back out snaps to it instantly
-                     # instead of recomputing the whole-dataset sketch.
-                     "overview_spec": w._spec,
+                     "vmin": _lg.get("minVal"), "vmax": _lg.get("maxVal"),
+                     # cached overview channels -> instant plot.draw on zoom-out.
+                     "overview_channels": _vp_channels(w._spec),
                      "overview_draw_order": w._draw_order}
             w.on_msg(_viewport_handler)
         except Exception:
