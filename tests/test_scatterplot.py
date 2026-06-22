@@ -146,6 +146,23 @@ def test_progressive_renders_subset_first(adata):
     assert w.selection == target                      # lasso still maps to original
 
 
+def test_density_subsample_keeps_rare_cells():
+    pytest.importorskip("anywidget")
+    rng = np.random.default_rng(0)
+    big = rng.normal(0, 1, (50000, 2))
+    rare = rng.normal(25, 0.3, (120, 2))             # tiny far cluster (rare cell type)
+    xy = np.vstack([big, rare])
+    df = pd.DataFrame({"x": xy[:, 0], "y": xy[:, 1],
+                       "lab": np.r_[np.zeros(50000, int), np.ones(120, int)].astype(str)})
+    d = rs.scatterplot(df, x="x", y="y", color="lab", max_points=1000,
+                       subsample="density", show=False)
+    r = rs.scatterplot(df, x="x", y="y", color="lab", max_points=1000,
+                       subsample="random", show=False)
+    rare_density = int((np.asarray(d._draw_order) >= 50000).sum())
+    rare_random = int((np.asarray(r._draw_order) >= 50000).sum())
+    assert rare_density > rare_random * 3             # density preserves rare cells far better
+
+
 def test_max_points_noop_when_under_threshold(adata):
     w = rs.scatterplot(adata, basis="umap", color="celltype",
                        max_points=10_000, show=False)

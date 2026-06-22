@@ -77,7 +77,47 @@ def _maybe_save(obj, save):
         )
 
 
-def _render_index(color, n, sort_order, random_state, max_points):
+def _density_sketch(x, y, target, seed):
+    """Density-preserving subsample of indices: bin the 2D embedding into a grid
+    and keep an even number per occupied cell, so dense blobs are thinned but
+    sparse / rare regions survive (atlas-safe — unlike uniform random sampling,
+    which would drop rare cell types). Vectorised, ~O(n log n). None if target>=n.
+    """
+    n = int(x.shape[0])
+    if target >= n:
+        return None
+    rng = np.random.RandomState(0 if seed is None else int(seed))
+    g = max(1, int(np.sqrt(target)))   # grid side scaled to the target budget
+
+    def _bin(a):
+        a = np.asarray(a, "float64")
+        lo, hi = np.nanmin(a), np.nanmax(a)
+        if not np.isfinite(lo) or hi <= lo:
+            return np.zeros(n, dtype=np.int64)
+        return np.clip(((a - lo) / (hi - lo) * g).astype(np.int64), 0, g - 1)
+
+    cell = _bin(x) * (g + 1) + _bin(y)
+    # random order within each cell: sort by cell, break ties randomly
+    order = np.argsort(cell + rng.random(n), kind="stable")
+    cs = cell[order]
+    change = np.empty(n, dtype=bool); change[0] = True; change[1:] = cs[1:] != cs[:-1]
+    run_start = np.maximum.accumulate(np.where(change, np.arange(n), 0))
+    rank = np.arange(n) - run_start                     # 0-based position within its cell
+    per = max(1, target // max(1, int(change.sum())))   # even budget per occupied cell
+    idx = order[rank < per]
+    if idx.shape[0] > target:                            # trim overshoot
+        idx = rng.choice(idx, target, replace=False)
+    elif idx.shape[0] < target:                          # top up to fill the budget
+        mask = np.ones(n, dtype=bool); mask[idx] = False
+        rest = np.where(mask)[0]
+        if rest.shape[0]:
+            add = rng.choice(rest, min(target - idx.shape[0], rest.shape[0]), replace=False)
+            idx = np.concatenate([idx, add])
+    return np.sort(idx)
+
+
+def _render_index(color, n, sort_order, random_state, max_points,
+                  x=None, y=None, subsample="density"):
     """Indices (into the original n points) to actually render, in draw order.
 
     When ``max_points`` is set and ``n`` is larger, **subsample** to that many
@@ -90,8 +130,11 @@ def _render_index(color, n, sort_order, random_state, max_points):
     """
     idx = None
     if max_points is not None and n > int(max_points):
-        rng = np.random.RandomState(0 if random_state is None else int(random_state))
-        idx = np.sort(rng.choice(n, int(max_points), replace=False))
+        if subsample == "density" and x is not None and y is not None:
+            idx = _density_sketch(x, y, int(max_points), random_state)  # atlas-safe
+        if idx is None:                                                  # random fallback
+            rng = np.random.RandomState(0 if random_state is None else int(random_state))
+            idx = np.sort(rng.choice(n, int(max_points), replace=False))
     m = n if idx is None else int(idx.shape[0])
     arr = np.asarray(color) if color is not None else None
     order = None
@@ -186,6 +229,7 @@ def scatterplot(
     sort_order: bool = True,        # draw higher continuous values on top (scanpy)
     random_state: Optional[int] = None,  # seed -> random draw order (reduce overplotting)
     max_points: Any = "auto",            # subsample huge data for smooth exploration; "auto" caps at 500k, None = all points
+    subsample: str = "density",           # "density" (atlas-safe: keeps rare cells) or "random"
     # --- original names (still supported as aliases) ------------------------
     basis: Optional[Union[str, int]] = None,
     x: Optional[Union[str, int]] = None,
@@ -387,6 +431,7 @@ def scatterplot(
                 custom_colors=custom_colors, vmin=vmin, vmax=vmax,
                 center_zero=center_zero, na_color=na_color, groups=groups,
                 sort_order=sort_order, random_state=random_state, max_points=max_points,
+                subsample=subsample,
                 title=(title or name), xlab=xlab, ylab=ylab,
                 legend_title=legend_title, show_axes=show_axes,
                 show_tooltip=show_tooltip, background_color=background_color,
@@ -459,7 +504,8 @@ def scatterplot(
     # (z-depth). Subset/reorder ALL per-point arrays consistently; the index is
     # stored on the widget and w.selection is translated back to ORIGINAL data
     # indices at the Python boundary, so the JS never needs to know.
-    draw_order = _render_index(pd_data.color, n, sort_order, random_state, max_points)
+    draw_order = _render_index(pd_data.color, n, sort_order, random_state, max_points,
+                               x=pd_data.x, y=pd_data.y, subsample=subsample)
     if draw_order is not None:
         import dataclasses
 
