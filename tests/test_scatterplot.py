@@ -135,6 +135,17 @@ def test_max_points_subsamples_and_selection_maps(adata):
     assert w.selection == target                      # round-trips in ORIGINAL coords
 
 
+def test_progressive_renders_subset_first(adata):
+    # force a subset (adata has 80 cells) -> instant first paint
+    w = rs.scatterplot(adata, basis="umap", color="celltype",
+                       progressive=True, max_points=20, show=False)
+    assert type(w).__name__ == "ReglScatter"          # progressive is live
+    assert w._spec["n_points"] == 20                  # subset rendered first
+    target = [int(w._draw_order[2])]                  # rendered original index
+    w.selection = target
+    assert w.selection == target                      # lasso still maps to original
+
+
 def test_max_points_noop_when_under_threshold(adata):
     w = rs.scatterplot(adata, basis="umap", color="celltype",
                        max_points=10_000, show=False)

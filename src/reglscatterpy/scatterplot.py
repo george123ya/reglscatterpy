@@ -240,6 +240,7 @@ def scatterplot(
     backend: str = "regl",
     interactive: bool = False,
     fast: bool = False,             # experimental: binary transfer (implies interactive)
+    progressive: bool = False,      # experimental: render a subset instantly, stream the full set after
     show: bool = True,
     **backend_kwargs: Any,
 ):
@@ -297,6 +298,10 @@ def scatterplot(
     ``save`` — and the original names (``color_by``, ``point_size``,
     ``continuous_palette``, ``categorical_palette``, ``dims`` …) keep working.
     """
+    # snapshot the call args up front so progressive mode can re-render the FULL
+    # data through this exact same pipeline (keeps lasso/filter/tooltip identical)
+    _params = {k: v for k, v in locals().items() if k != "data"}
+
     # --- scanpy-style aliases win over the original names when given --------
     if color is not _UNSET:
         color_by = color
@@ -315,6 +320,28 @@ def scatterplot(
         dims = tuple(int(c) - 1 for c in components)   # 1-based -> 0-based
     if fast:
         interactive = True   # binary transfer rides the live comm; needs a widget
+
+    # --- progressive: subset now (instant), full streamed in the background ---
+    if progressive and not _is_name_list(color_by) and backend == "regl":
+        interactive = True
+        sub_n = int(max_points) if max_points else 150_000
+        bk = dict(_params.pop("backend_kwargs", {}) or {})
+        base = {**_params, "progressive": False, "interactive": True, "show": False, "fast": True}
+        # instant first paint from a representative subset
+        w = scatterplot(data, **{**base, "max_points": sub_n}, **bk)
+        if w._spec.get("n_points", 0) >= sub_n:   # there's more -> stream the full set after
+            def _stream(_w=w, _data=data, _base=base, _bk=bk):
+                try:
+                    full = scatterplot(_data, **{**_base, "max_points": None}, **_bk)
+                    _w._inv_draw_order = None
+                    _w._draw_order = full._draw_order
+                    _w._source = full._source
+                    _w._spec = full._spec     # re-renders with all points
+                except Exception:
+                    pass
+            import threading
+            threading.Timer(0.5, _stream).start()
+        return w
 
     # --- validate enum-ish arguments up front (fail before doing work) ------
     if backend not in ("regl", "jscatter"):
