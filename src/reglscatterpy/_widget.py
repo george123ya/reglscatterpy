@@ -157,13 +157,14 @@ def _make_classes():
                 n = len(vp["x"]) if (vp and "x" in vp) else 0
             except Exception:
                 n = 0
-            # Always drain for at least min_settle so an interaction that's still in
-            # FLIGHT (the _sel_gen bump not yet received) can't be missed by an
-            # immediate applied>=gen "caught up" — that stale-low early-exit was why
-            # the first read after a lasso returned the previous state. The cap scales
-            # with dataset size: a point-in-polygon over millions of cells (select-all)
-            # runs synchronously in the comm handler and far exceeds a flat 2s.
-            min_settle = 0.15
+            # min_settle is the ARRIVAL window: the front-end bumps _sel_gen FIRST
+            # (a tiny "request" sent before the heavy message), so within this window
+            # the pump sees gen rise above _applied_gen and KNOWS to keep waiting —
+            # up to `cap` — until the kernel work acks. Without the window an
+            # immediate read sees the stale (pre-bump) gen == applied and exits early.
+            # cap scales with size: a 10M-point select-all runs synchronously in the
+            # comm handler for seconds and far exceeds a flat 2s.
+            min_settle = 0.4
             cap = min(30.0, max(3.0, (n / 1_000_000.0) * 4.0))
             import time as _t
             try:
@@ -519,18 +520,25 @@ def _make_classes():
         _filtered = traitlets.List(trait=traitlets.Int()).tag(sync=True)
         _filtered_on = traitlets.Bool(False).tag(sync=True)
         _camera = traitlets.List(trait=traitlets.Float()).tag(sync=True)
-        # Monotonic counter the front-end bumps on every selection/filter commit;
-        # the kernel echoes it to _applied_gen once processed, so _pump() can drain
-        # exactly until the latest interaction has landed (see _PlotAPI._pump).
+        # Request counter the front-end bumps FIRST on every selection/filter commit
+        # (before the data/work message). The kernel acks it to _applied_gen only
+        # AFTER the work completes, so _PlotAPI._pump() blocks until the interaction
+        # has actually landed — not merely been requested. Progressive panels ack
+        # inside their kernel work handlers (_lasso_payload / _legend_filter_payload /
+        # the deselect+reset branches / _on_user_sel); the observers below ack the
+        # NON-progressive path, where the trait IS the result.
         _sel_gen = traitlets.Int(0).tag(sync=True)
         _applied_gen = 0
 
-        @traitlets.observe("_sel_gen")
-        def _ack_sel_gen(self, change):
-            # Fires AFTER the selection/filter message it accompanies has been
-            # applied (the front-end bumps _sel_gen last), so matching gens means
-            # the kernel state is current.
-            self._applied_gen = int(change["new"] or 0)
+        @traitlets.observe("_selection")
+        def _ack_selection(self, change):
+            if getattr(self, "_vp", None) is None:      # non-progressive only
+                self._applied_gen = int(getattr(self, "_sel_gen", 0) or 0)
+
+        @traitlets.observe("_filtered")
+        def _ack_filtered(self, change):
+            if getattr(self, "_vp", None) is None:      # non-progressive only
+                self._applied_gen = int(getattr(self, "_sel_gen", 0) or 0)
 
         def update(self, spec: dict) -> "ReglScatter":
             self._spec = spec
