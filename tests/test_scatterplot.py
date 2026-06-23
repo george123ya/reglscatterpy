@@ -73,7 +73,13 @@ def test_interactive_render_is_live_widget(adata):
 
 # --- Change 2: color_by list -> linked grid -------------------------------- #
 def test_color_by_list_makes_linked_grid(adata):
-    w = rs.scatterplot(adata, basis="umap", color_by=["celltype", "Gene3"], show=False)
+    # default (static) -> an HTML iframe-grid that renders without ipywidgets
+    h = rs.scatterplot(adata, basis="umap", color_by=["celltype", "Gene3"], show=False)
+    assert type(h).__name__ == "_HtmlGrid"
+    assert len(h.panels) == 2 and "text/html" in h._repr_mimebundle_()
+    # interactive=True -> a linked live GridBox
+    w = rs.scatterplot(adata, basis="umap", color_by=["celltype", "Gene3"],
+                       interactive=True, show=False)
     assert "GridBox" in [c.__name__ for c in type(w).__mro__]
     assert len(w.children) == 2
     titles = {c._spec["title"] for c in w.children}
@@ -232,12 +238,16 @@ def test_cmap_and_palette_aliases(adata):
 
 def test_compose_accepts_plain_plots(adata):
     from reglscatterpy import _widget
-    a = rs.scatterplot(adata, basis="umap", color="celltype")   # no interactive=True
+    a = rs.scatterplot(adata, basis="umap", color="celltype")   # static
     b = rs.scatterplot(adata, basis="umap", color="Gene3")
-    g = rs.compose([a, b])                                        # auto-upgraded
-    assert "GridBox" in [c.__name__ for c in type(g).__mro__]
-    assert all(_widget.is_live_widget(c) for c in g.children)
-    assert all(c._width == 0 for c in g.children)                # responsive in the grid
+    g = rs.compose([a, b])                                        # static -> HTML grid
+    assert type(g).__name__ == "_HtmlGrid"
+    assert len(g.panels) == 2 and "text/html" in g._repr_mimebundle_()
+    # forcing live links upgrades to a GridBox of live widgets
+    g2 = rs.compose([a, b], sync=True)
+    assert "GridBox" in [c.__name__ for c in type(g2).__mro__]
+    assert all(_widget.is_live_widget(c) for c in g2.children)
+    assert all(c._width == 0 for c in g2.children)                # responsive in the grid
 
 
 def test_single_element_color_list_is_single_plot(adata):
@@ -249,8 +259,7 @@ def test_single_element_color_list_is_single_plot(adata):
 def test_ncols_in_grid(adata):
     g = rs.scatterplot(adata, basis="umap", color=["celltype", "Gene3", "Gene4"],
                        ncols=3, show=False)
-    cols = g.layout.grid_template_columns
-    assert "repeat(3" in cols
+    assert g._cols == 3   # the static HTML grid lays out in 3 columns
 
 
 def test_save_html(tmp_path, adata):

@@ -48,6 +48,16 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync="auto"):
     if not plots:
         raise ValueError("compose() needs at least one plot.")
 
+    from ._widget import ReglScatter, is_live_widget
+
+    # Static panels (the default) -> render as an HTML iframe-grid that needs NO
+    # ipywidgets frontend, so multi-panel plots show up even in an HPC / SCC
+    # JupyterLab where the widget manager isn't active. (Not camera/lasso-linked —
+    # linking needs live widgets; pass interactive=True / sync=True for that.)
+    if sync is not True and all(not is_live_widget(p) for p in plots):
+        cols = cols or ceil(sqrt(len(plots)))
+        return _HtmlGrid(plots, cols)
+
     # A linked grid syncs over the kernel, so each panel must be a live widget.
     # Auto-upgrade plain (default static) plots so you DON'T have to pass
     # interactive=True to every scatterplot() — just compose([a, b]).
@@ -215,3 +225,37 @@ def _composed_plots_class():
             return self
 
     return _ComposedPlots
+
+
+class _HtmlGrid:
+    """A static multi-panel grid rendered as an HTML CSS-grid of ``<iframe>``s.
+
+    Needs NO ipywidgets frontend, so it shows up even in an HPC / BU-SCC JupyterLab
+    where the widget manager isn't active (a live ``GridBox`` would there fall back
+    to its text ``repr``). Panels are independent (static, no kernel link) — use
+    ``grid.panels[i]`` for each; pass ``interactive=True`` for a linked live grid.
+    """
+
+    def __init__(self, panels, cols):
+        self._panels = list(panels)
+        self._cols = cols
+
+    @property
+    def panels(self):
+        return list(self._panels)
+
+    def _repr_mimebundle_(self, **kwargs):
+        from ._export import iframe_srcdoc
+
+        cells = "\n".join(
+            iframe_srcdoc(p) for p in self._panels if getattr(p, "_spec", None)
+        )
+        html = (
+            f'<div style="display:grid; '
+            f'grid-template-columns:repeat({self._cols},1fr); gap:8px; '
+            f'align-items:start;">{cells}</div>'
+        )
+        return {
+            "text/html": html,
+            "text/plain": f"reglscatterpy grid ({len(self._panels)} panels)",
+        }

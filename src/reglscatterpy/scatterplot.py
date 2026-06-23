@@ -1056,7 +1056,10 @@ def scatterplot(
                 range_padding=range_padding, xrange=xrange, yrange=yrange,
                 filter_by=filter_by, point_labels=point_labels, plot_id=None,
                 width=None, height=height, backend=backend,  # responsive in the grid
-                interactive=True, show=False,  # linked sync needs live widgets
+                # interactive=True -> linked live GridBox (needs the widgets frontend);
+                # default static -> an HTML iframe-grid that renders anywhere (e.g. an
+                # HPC JupyterLab without the widget manager), just not camera-linked.
+                interactive=interactive, show=False,
                 **backend_kwargs,
             )
             for name in color_by
