@@ -17,7 +17,7 @@ from typing import Optional, Sequence
 __all__ = ["compose"]
 
 
-def compose(plots: Sequence, cols: Optional[int] = None, sync: bool = True):
+def compose(plots: Sequence, cols: Optional[int] = None, sync="auto"):
     """Lay out scatterplot widgets in a linked grid.
 
     Parameters
@@ -27,12 +27,17 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync: bool = True):
     cols
         Number of columns (defaults to a near-square grid).
     sync
-        When ``True`` (default), pan/zoom and lasso selection are synchronised
-        across all plots.
+        ``"auto"`` (default) links pan/zoom, lasso selection and filters across
+        panels **only when they share the same data object** — panels from
+        *different* AnnData files stay independent (linking by cell index would be
+        meaningless). ``True`` / ``False`` force linking on / off.
 
     Returns
     -------
-    An ``ipywidgets.GridBox`` containing the linked plots.
+    A ``GridBox`` (subclass) of the plots. When linked it exposes the group's
+    ``selection`` / ``filtered`` / ``subset`` / ``composition`` / ``diff_expression``;
+    either way ``grid.panels`` gives the per-panel widgets (e.g.
+    ``grid.panels[0].filtered``).
     """
     try:
         import ipywidgets
@@ -71,19 +76,38 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync: bool = True):
             stacklevel=2,
         )
 
+    # Decide whether to LINK: by default only when every panel shares the same data
+    # object (same cells) — different AnnData files can't be synced by cell index.
+    _src0 = getattr(plots[0], "_source", None)
+    same_source = _src0 is not None and all(
+        getattr(p, "_source", None) is _src0 for p in plots)
+    if sync == "auto":
+        do_sync = same_source
+        if not do_sync and len(plots) > 1:
+            import warnings
+            warnings.warn(
+                "compose(): panels come from different data sources, so selection / "
+                "filter are NOT linked (cells aren't comparable across them). Use "
+                "grid.panels[i] for each; pass sync=True to force linking if the cells "
+                "do correspond.",
+                stacklevel=2,
+            )
+    else:
+        do_sync = bool(sync)
+
     ids = [f"sp_compose_{i}" for i in range(len(plots))]
-    group = ids if sync else None
+    group = ids if do_sync else None
     for w, pid in zip(plots, ids):
         spec = dict(getattr(w, "_spec", {}) or {})
         spec["plotId"] = pid
         spec["syncPlots"] = group
-        spec["syncState"] = bool(sync)
+        spec["syncState"] = bool(do_sync)
         w._width = 0   # panels are responsive so they fit their grid column
         w._spec = spec  # re-renders the widget with the sync wiring
 
     # progressive panels coordinate selection/filter across the group by ORIGINAL
     # cell index (each maps to its own draw order) — give each a ref to the siblings.
-    if sync:
+    if do_sync:
         for w in plots:
             vp = getattr(w, "_vp", None)
             if vp is not None:
@@ -98,6 +122,7 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync: bool = True):
         ),
     )
     grid._panels = plots
+    grid._synced = do_sync
     return grid
 
 
@@ -118,7 +143,18 @@ def _composed_plots_class():
 
     class _ComposedPlots(ipywidgets.GridBox):
         @property
+        def panels(self):
+            """The individual plot widgets, e.g. ``grid.panels[0].filtered``."""
+            return list(getattr(self, "_panels", []))
+
+        @property
         def _primary(self):
+            if not getattr(self, "_synced", True):
+                raise AttributeError(
+                    "These panels are independent (different data sources), so there "
+                    "is no shared selection/filter. Use grid.panels[i].selection / "
+                    ".filtered for each, or compose([...], sync=True) to link them."
+                )
             for p in getattr(self, "_panels", []):
                 if callable(getattr(p, "send", None)):
                     return p                      # first live panel

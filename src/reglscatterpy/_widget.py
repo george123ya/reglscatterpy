@@ -29,6 +29,30 @@ __all__ = ["ReglScatter", "StaticPlot", "is_live_widget"]
 _STATIC = pathlib.Path(__file__).parent / "static" / "widget.js"
 
 
+class _SelectionResult(list):
+    """The selected ORIGINAL indices — a plain ``list`` that *also* carries the
+    analysis helpers, so both ``w.composition('louvain')`` and the clearer
+    ``w.selection.composition('louvain')`` work (likewise ``.subset()``,
+    ``.diff_expression()``, ``.annotate()``)."""
+
+    def __init__(self, indices, widget=None):
+        super().__init__(indices)
+        self._w = widget
+
+    def composition(self, by, **kw):
+        return self._w.composition(by, selection=list(self), **kw)
+
+    def subset(self):
+        return self._w.subset(selection=list(self))
+
+    def diff_expression(self, group_b=None, **kw):
+        return self._w.diff_expression(group_a=list(self), group_b=group_b, **kw)
+
+    def annotate(self, key, label):
+        return self._w.annotate(key, label, selection=list(self))
+
+
+
 def _make_classes():
     try:
         import anywidget
@@ -87,12 +111,12 @@ def _make_classes():
             # survives viewport swaps; prefer it when present.
             vp = getattr(self, "_vp", None)
             if vp is not None and "sel" in vp:
-                return sorted(int(i) for i in vp["sel"])
+                return _SelectionResult(sorted(int(i) for i in vp["sel"]), self)
             sel = list(self._selection)
             perm = getattr(self, "_draw_order", None)
             if perm is not None:
-                return [int(perm[p]) for p in sel if 0 <= p < len(perm)]
-            return [int(p) for p in sel]
+                return _SelectionResult((int(perm[p]) for p in sel if 0 <= p < len(perm)), self)
+            return _SelectionResult((int(p) for p in sel), self)
 
         @property
         def filtered(self):
