@@ -74,6 +74,16 @@ def _make_classes():
                 return [int(perm[p]) for p in sel if 0 <= p < len(perm)]
             return [int(p) for p in sel]
 
+        @property
+        def filtered(self):
+            """Original indices of the cells currently passing the in-plot filters
+            (range sliders + legend categories), or ``None`` when no filter is
+            active. Live (``interactive=True``) only — like :attr:`selection`, but
+            for the filter instead of the lasso."""
+            if not getattr(self, "_filtered_on", False):
+                return None
+            return sorted(int(i) for i in getattr(self, "_filtered", []))
+
         def _resolve_orig_indices(self, indices):
             """Coerce a selection-like input to ORIGINAL integer indices. Accepts
             integer positions, obs_names / DataFrame index labels (strings), or a
@@ -353,6 +363,8 @@ def _make_classes():
         _height = traitlets.Int(500).tag(sync=True)
         _width = traitlets.Int(0).tag(sync=True)
         _selection = traitlets.List(trait=traitlets.Int()).tag(sync=True)
+        _filtered = traitlets.List(trait=traitlets.Int()).tag(sync=True)
+        _filtered_on = traitlets.Bool(False).tag(sync=True)
 
         def update(self, spec: dict) -> "ReglScatter":
             self._spec = spec
