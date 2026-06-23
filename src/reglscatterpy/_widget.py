@@ -39,12 +39,32 @@ def _make_classes():
             "Install with: pip install reglscatterpy"
         ) from exc
 
+    def _alias_trap(wrong, right):
+        """A property that errors on read OR assignment of a common misspelling —
+        Python otherwise silently lets ``w.<wrong> = ...`` create a dead attribute."""
+        msg = (f"'{wrong}' is not a reglscatterpy plot attribute — did you mean "
+               f"'.{right}'? (Assigning a misspelled attribute would otherwise "
+               "silently do nothing.)")
+
+        def _raise(self, *args):
+            raise AttributeError(msg)
+
+        return property(_raise, _raise)
+
     class _PlotAPI:
         """Analysis API shared by the static plot and the live widget.
 
         Operates on ``self._spec``, ``self._source`` and ``self._selection``
         (a synced trait on the live widget, a plain list on the static plot).
         """
+
+        # Trap the typos that silently no-op as attribute assignments.
+        selected = _alias_trap("selected", "selection")
+        select = _alias_trap("select", "selection")
+        selections = _alias_trap("selections", "selection")
+        highlights = _alias_trap("highlights", "highlight")
+        filter = _alias_trap("filter", "filtered")
+        filters = _alias_trap("filters", "filtered")
 
         def to_html(self, path, title="reglscatterpy plot"):
             """Save this plot as a standalone, offline HTML file (like R's
@@ -249,8 +269,10 @@ def _make_classes():
             (names / scores / logfoldchanges / pvals / pvals_adj). Otherwise it
             falls back to a Welch t-test. AnnData/MuData only.
 
-            ``key_added`` — if given, also store the result frame in
-            ``adata.uns[key_added]`` so you can retrieve it later.
+            When the source is an **AnnData** the result is **auto-saved** to
+            ``adata.uns`` (scanpy-style) — default key ``"rank_genes_groups"`` (the
+            scanpy convention), or ``key_added`` if you pass one. Pass
+            ``key_added=False`` to skip saving.
             """
             import numpy as np
             import pandas as pd
@@ -269,9 +291,14 @@ def _make_classes():
                 labels[self._resolve_orig_indices(group_b)] = "B"
                 ref = "B"
 
-            def _save(df):
-                if key_added is not None and hasattr(src, "uns"):
-                    src.uns[key_added] = df
+            # Auto-save when the source has .uns (AnnData). Default to scanpy's
+            # 'rank_genes_groups' key; key_added overrides; key_added=False disables.
+            _save_to = (None if key_added is False or not hasattr(src, "uns")
+                        else (key_added or "rank_genes_groups"))
+
+            def _save(df, uns_native=None):
+                if _save_to is not None:
+                    src.uns[_save_to] = uns_native if uns_native is not None else df
                 return df
 
             # Preferred path: scanpy's rank_genes_groups (AnnData only).
@@ -281,11 +308,15 @@ def _make_classes():
 
                     ad = src.copy()
                     ad.obs["_rs_grp"] = pd.Categorical(labels)
+                    _key = _save_to or "rank_genes_groups"
                     sc.tl.rank_genes_groups(
                         ad, "_rs_grp", groups=["A"], reference=ref,
-                        method=method, layer=layer, n_genes=n,
+                        method=method, layer=layer, n_genes=n, key_added=_key,
                     )
-                    return _save(sc.get.rank_genes_groups_df(ad, group="A").head(n).reset_index(drop=True))
+                    df = sc.get.rank_genes_groups_df(ad, group="A", key=_key).head(n).reset_index(drop=True)
+                    # store the scanpy-NATIVE uns structure on the real adata, so
+                    # sc.pl.rank_genes_groups(adata) etc. work afterwards.
+                    return _save(df, uns_native=ad.uns.get(_key))
                 except ImportError:
                     pass  # fall back to the built-in test below
 
