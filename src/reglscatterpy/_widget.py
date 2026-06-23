@@ -222,6 +222,17 @@ def _make_classes():
                     "filter state can't be read back into Python."
                 )
             self._pump()    # apply any just-made filter before reading it back
+            # Progressive (detail-on-zoom): the authoritative filter is the kernel's
+            # ORIGINAL-cell keep over the FULL dataset (vp["filter_keep"]), NOT the
+            # _filtered trait / _draw_order, which only cover the cells currently drawn
+            # in the viewport. Reading those would under-count to the visible subset.
+            vp = getattr(self, "_vp", None)
+            if vp is not None and "x" in vp:
+                import numpy as np
+                keep = vp.get("filter_keep")
+                if keep is not None:                       # legend/category filter active
+                    return np.asarray(keep, dtype=np.int64).tolist()   # originals, ascending
+                return list(range(len(vp["x"])))           # no filter -> every cell passes
             if getattr(self, "_filtered_on", False):
                 return sorted(int(i) for i in getattr(self, "_filtered", []))
             # no active filter -> every shown cell passes
