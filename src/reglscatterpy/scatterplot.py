@@ -1178,6 +1178,11 @@ def scatterplot(
         point_labels=point_labels, plot_id=plot_id, filter_by=filter_by,
         binary=_fast,
     )
+    # Draw order (original cell index per drawn position). Lets the client sync a
+    # selection across LINKED panels by ORIGINAL cell even when panels are drawn in
+    # different orders (e.g. compose([a, b]) coloured by different variables).
+    if draw_order is not None:
+        spec["drawOrder"] = np.asarray(draw_order).astype("int32").tolist()
     if _detail_on_zoom:
         spec["detailOnZoom"] = True   # client emits viewport msgs -> kernel re-renders in-view cells
         # squares + no alpha-blend are much cheaper per draw; default on for the
