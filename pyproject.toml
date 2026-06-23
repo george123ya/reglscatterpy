@@ -25,6 +25,9 @@ dependencies = [
     # The default renderer: our own anywidget driving the SAME compiled widget
     # the R package ships, so R and Python plots are pixel-identical.
     "anywidget>=0.9",
+    # Lets w.selection / w.filtered drain pending front-end messages so a
+    # just-drawn lasso is applied before the (synchronous) Python read.
+    "jupyter-ui-poll>=0.2",
 ]
 
 [project.optional-dependencies]

@@ -124,6 +124,31 @@ def _make_classes():
                     spec["init_server_indices"] = [int(o) for o in keep]
             return spec
 
+        def _pump(self):
+            """Drain pending front-end messages so a just-made lasso / selection /
+            filter is reflected BEFORE we read it back.
+
+            ``w.selection`` is a plain Python read, but the lasso travels to the
+            kernel as an async widget message; if the kernel hasn't processed it
+            yet (it falls behind on big data — 10M-point polygon tests + viewport
+            redraws), the read returns the *previous* state (one step stale). This
+            forces the queued messages through first. No-op on a static plot or if
+            ``jupyter_ui_poll`` isn't installed (then reads may lag by one step)."""
+            if not callable(getattr(self, "send", None)):
+                return
+            try:
+                from jupyter_ui_poll import ui_events
+            except Exception:
+                return
+            try:
+                import time as _t
+                with ui_events() as poll:
+                    poll(512)            # process whatever the front-end already sent
+                    _t.sleep(0.03)       # tiny nudge to catch an in-flight message...
+                    poll(512)            # ...then drain that too
+            except Exception:
+                pass
+
         @property
         def selection(self):
             """Indices of the lasso-selected points (read or assign), always in
@@ -133,6 +158,7 @@ def _make_classes():
             Live (``interactive=True``) only — on a static plot this stays empty
             because there is no kernel link.
             """
+            self._pump()    # make sure a just-drawn lasso has been applied
             # detail-on-zoom keeps the logical selection (original indices) so it
             # survives viewport swaps; prefer it when present.
             vp = getattr(self, "_vp", None)
@@ -157,6 +183,7 @@ def _make_classes():
                     "interactive=True. A static plot has no kernel link, so the "
                     "filter state can't be read back into Python."
                 )
+            self._pump()    # apply any just-made filter before reading it back
             if getattr(self, "_filtered_on", False):
                 return sorted(int(i) for i in getattr(self, "_filtered", []))
             # no active filter -> every shown cell passes
