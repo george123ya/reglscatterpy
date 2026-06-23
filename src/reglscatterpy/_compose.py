@@ -90,10 +90,76 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync: bool = True):
                 vp["group"] = plots
 
     cols = cols or ceil(sqrt(len(plots)))
-    return ipywidgets.GridBox(
+    grid = _get_composed_class()(
         plots,
         layout=ipywidgets.Layout(
             grid_template_columns=f"repeat({cols}, 1fr)",
             grid_gap="8px",
         ),
     )
+    grid._panels = plots
+    return grid
+
+
+_COMPOSED_CLS = None
+
+
+def _get_composed_class():
+    global _COMPOSED_CLS
+    if _COMPOSED_CLS is None:
+        _COMPOSED_CLS = _composed_plots_class()
+    return _COMPOSED_CLS
+
+
+def _composed_plots_class():
+    """A GridBox that also exposes the group's synced selection / filter / analysis
+    (the panels are linked, so reading any one gives the group's state)."""
+    import ipywidgets
+
+    class _ComposedPlots(ipywidgets.GridBox):
+        @property
+        def _primary(self):
+            for p in getattr(self, "_panels", []):
+                if callable(getattr(p, "send", None)):
+                    return p                      # first live panel
+            return self._panels[0]
+
+        @property
+        def selection(self):
+            """The group's lasso selection (original indices) — assignable to all panels."""
+            return self._primary.selection
+
+        @selection.setter
+        def selection(self, value):
+            for p in self._panels:
+                try:
+                    p.selection = value
+                except Exception:
+                    pass
+
+        @property
+        def filtered(self):
+            """Original indices passing the group's (synced) filters."""
+            return self._primary.filtered
+
+        def subset(self, *a, **k):
+            return self._primary.subset(*a, **k)
+
+        def diff_expression(self, *a, **k):
+            return self._primary.diff_expression(*a, **k)
+
+        def composition(self, *a, **k):
+            return self._primary.composition(*a, **k)
+
+        def annotate(self, *a, **k):
+            return self._primary.annotate(*a, **k)
+
+        def highlight(self, *a, **k):
+            for p in self._panels:
+                try:
+                    p.highlight(*a, **k)
+                except Exception:
+                    pass
+            return self
+
+    return _ComposedPlots

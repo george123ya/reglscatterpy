@@ -97,12 +97,24 @@ def _make_classes():
         @property
         def filtered(self):
             """Original indices of the cells currently passing the in-plot filters
-            (range sliders + legend categories), or ``None`` when no filter is
-            active. Live (``interactive=True``) only — like :attr:`selection`, but
-            for the filter instead of the lasso."""
-            if not getattr(self, "_filtered_on", False):
-                return None
-            return sorted(int(i) for i in getattr(self, "_filtered", []))
+            (range sliders + legend categories). When no filter is active this is
+            **all shown cells** (everything passes). Live (``interactive=True``)
+            only — like :attr:`selection`, but for the filter instead of the lasso.
+            """
+            if not callable(getattr(self, "send", None)):
+                raise AttributeError(
+                    "w.filtered needs a live widget — build it with "
+                    "interactive=True. A static plot has no kernel link, so the "
+                    "filter state can't be read back into Python."
+                )
+            if getattr(self, "_filtered_on", False):
+                return sorted(int(i) for i in getattr(self, "_filtered", []))
+            # no active filter -> every shown cell passes
+            do = getattr(self, "_draw_order", None)
+            if do is not None:
+                return sorted(int(i) for i in do)
+            n = (getattr(self, "_spec", None) or {}).get("n_points")
+            return list(range(int(n))) if n else []
 
         def _resolve_orig_indices(self, indices):
             """Coerce a selection-like input to ORIGINAL integer indices. Accepts

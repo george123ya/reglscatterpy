@@ -74,7 +74,7 @@ def test_interactive_render_is_live_widget(adata):
 # --- Change 2: color_by list -> linked grid -------------------------------- #
 def test_color_by_list_makes_linked_grid(adata):
     w = rs.scatterplot(adata, basis="umap", color_by=["celltype", "Gene3"], show=False)
-    assert type(w).__name__ == "GridBox"
+    assert "GridBox" in [c.__name__ for c in type(w).__mro__]
     assert len(w.children) == 2
     titles = {c._spec["title"] for c in w.children}
     assert titles == {"celltype", "Gene3"}
@@ -235,7 +235,7 @@ def test_compose_accepts_plain_plots(adata):
     a = rs.scatterplot(adata, basis="umap", color="celltype")   # no interactive=True
     b = rs.scatterplot(adata, basis="umap", color="Gene3")
     g = rs.compose([a, b])                                        # auto-upgraded
-    assert type(g).__name__ == "GridBox"
+    assert "GridBox" in [c.__name__ for c in type(g).__mro__]
     assert all(_widget.is_live_widget(c) for c in g.children)
     assert all(c._width == 0 for c in g.children)                # responsive in the grid
 
