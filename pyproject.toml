@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "reglscatterpy"
-version = "0.6.5"
+version = "0.6.6"
 description = "Interactive WebGL scatterplots for single-cell data (AnnData/MuData/SpatialData) in Jupyter, VS Code and Shiny for Python"
 readme = "README.md"
 requires-python = ">=3.9"
