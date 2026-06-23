@@ -152,21 +152,32 @@ def _make_classes():
                         "(pip install jupyter-ui-poll). Without it the value can lag "
                         "by one interaction.", RuntimeWarning, stacklevel=3)
                 return
+            try:
+                vp = getattr(self, "_vp", None)
+                n = len(vp["x"]) if (vp and "x" in vp) else 0
+            except Exception:
+                n = 0
+            # Always drain for at least min_settle so an interaction that's still in
+            # FLIGHT (the _sel_gen bump not yet received) can't be missed by an
+            # immediate applied>=gen "caught up" — that stale-low early-exit was why
+            # the first read after a lasso returned the previous state. The cap scales
+            # with dataset size: a point-in-polygon over millions of cells (select-all)
+            # runs synchronously in the comm handler and far exceeds a flat 2s.
+            min_settle = 0.15
+            cap = min(30.0, max(3.0, (n / 1_000_000.0) * 4.0))
             import time as _t
             try:
-                deadline = _t.monotonic() + 2.0
-                stable = 0
+                start = _t.monotonic()
                 with ui_events() as poll:
-                    while _t.monotonic() < deadline:
+                    while True:
                         poll(256)                 # process whatever the front-end sent
+                        elapsed = _t.monotonic() - start
                         gen = int(getattr(self, "_sel_gen", 0) or 0)
                         applied = int(getattr(self, "_applied_gen", 0) or 0)
-                        if applied >= gen:
-                            stable += 1
-                            if stable >= 2:       # caught up; no newer gen in flight
-                                break
-                        else:
-                            stable = 0            # still behind -> keep draining
+                        if applied >= gen and elapsed >= min_settle:
+                            break                 # caught up AND waited for in-flight
+                        if elapsed >= cap:
+                            break                 # give up (kernel stuck) -> stale
                         _t.sleep(0.012)
             except Exception:
                 pass

@@ -391,6 +391,22 @@ def _viewport_handler(widget, content, buffers):
             _viewport_payload(widget, content["bounds"], seq=content.get("seq"))
         elif t == "lasso":
             _lasso_payload(widget, content.get("polygon"))
+        elif t == "deselect":
+            # Authoritative, in-band selection clear (same channel as viewport msgs):
+            # zero vp["sel"] group-wide AND push a clearing vp_select [] so a stale
+            # pan/zoom redraw can't leave the old region (or the overview-union "select
+            # all") highlighted after the user deselected.
+            vp = getattr(widget, "_vp", None)
+            if vp is not None:
+                for _panel in (vp.get("group") or [widget]):
+                    _pvp = getattr(_panel, "_vp", None)
+                    if _pvp is not None:
+                        _pvp["sel"] = set()
+                        _pvp["showing_overview"] = False
+                    try:
+                        _panel.send({"type": "vp_select", "select": []})
+                    except Exception:
+                        pass
         elif t == "legend_filter":
             _legend_filter_payload(widget, content.get("cats"))
     except Exception:
