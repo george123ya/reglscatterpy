@@ -94,6 +94,22 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync="auto"):
             )
     else:
         do_sync = bool(sync)
+        # Forcing sync across different sources links by CELL INDEX (position i in
+        # one panel == position i in another) — valid only when the panels are the
+        # same cells in the same order. Warn if the sizes don't even match.
+        if do_sync and not same_source:
+            def _nobs(p):
+                src = getattr(p, "_source", None)
+                return getattr(src, "n_obs", None) or getattr(src, "shape", [None])[0]
+            sizes = [_nobs(p) for p in plots]
+            if len({s for s in sizes if s is not None}) > 1:
+                import warnings
+                warnings.warn(
+                    f"compose(sync=True): panels have different sizes {sizes}; "
+                    "index-based sync only lines up when the panels are the SAME "
+                    "cells in the SAME order. Selection/filter will misalign here.",
+                    stacklevel=2,
+                )
 
     ids = [f"sp_compose_{i}" for i in range(len(plots))]
     group = ids if do_sync else None
