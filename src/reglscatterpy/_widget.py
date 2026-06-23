@@ -82,6 +82,8 @@ def _make_classes():
         (a synced trait on the live widget, a plain list on the static plot).
         """
 
+        _warned_no_poll = False   # warn once if jupyter_ui_poll is missing
+
         # Trap the typos that silently no-op as attribute assignments.
         selected = _alias_trap("selected", "selection")
         select = _alias_trap("select", "selection")
@@ -125,27 +127,47 @@ def _make_classes():
             return spec
 
         def _pump(self):
-            """Drain pending front-end messages so a just-made lasso / selection /
-            filter is reflected BEFORE we read it back.
+            """Block until the kernel has applied the LATEST front-end interaction,
+            so a just-made lasso / selection / filter is reflected before we read it.
 
-            ``w.selection`` is a plain Python read, but the lasso travels to the
-            kernel as an async widget message; if the kernel hasn't processed it
-            yet (it falls behind on big data — 10M-point polygon tests + viewport
-            redraws), the read returns the *previous* state (one step stale). This
-            forces the queued messages through first. No-op on a static plot or if
-            ``jupyter_ui_poll`` isn't installed (then reads may lag by one step)."""
+            ``w.selection`` is a synchronous Python read, but the lasso travels to
+            the kernel as an async widget message; on big data the kernel falls a
+            step behind (10M-point polygon tests + viewport redraws), so the read
+            would return the *previous* state. Every selection/filter the front-end
+            commits bumps ``_sel_gen``; the kernel echoes it to ``_applied_gen``
+            once processed. Here we drain pending messages until those match —
+            never stopping mid-backlog (which would land on a stale cluster). No-op
+            on a static plot. Needs ``jupyter_ui_poll``; warns once if missing."""
             if not callable(getattr(self, "send", None)):
                 return
             try:
                 from jupyter_ui_poll import ui_events
             except Exception:
+                if not _PlotAPI._warned_no_poll:
+                    _PlotAPI._warned_no_poll = True
+                    import warnings
+                    warnings.warn(
+                        "reglscatterpy: install 'jupyter-ui-poll' so w.selection / "
+                        "w.filtered reflect the latest lasso immediately "
+                        "(pip install jupyter-ui-poll). Without it the value can lag "
+                        "by one interaction.", RuntimeWarning, stacklevel=3)
                 return
+            import time as _t
             try:
-                import time as _t
+                deadline = _t.monotonic() + 2.0
+                stable = 0
                 with ui_events() as poll:
-                    poll(512)            # process whatever the front-end already sent
-                    _t.sleep(0.03)       # tiny nudge to catch an in-flight message...
-                    poll(512)            # ...then drain that too
+                    while _t.monotonic() < deadline:
+                        poll(256)                 # process whatever the front-end sent
+                        gen = int(getattr(self, "_sel_gen", 0) or 0)
+                        applied = int(getattr(self, "_applied_gen", 0) or 0)
+                        if applied >= gen:
+                            stable += 1
+                            if stable >= 2:       # caught up; no newer gen in flight
+                                break
+                        else:
+                            stable = 0            # still behind -> keep draining
+                        _t.sleep(0.012)
             except Exception:
                 pass
 
@@ -486,6 +508,18 @@ def _make_classes():
         _filtered = traitlets.List(trait=traitlets.Int()).tag(sync=True)
         _filtered_on = traitlets.Bool(False).tag(sync=True)
         _camera = traitlets.List(trait=traitlets.Float()).tag(sync=True)
+        # Monotonic counter the front-end bumps on every selection/filter commit;
+        # the kernel echoes it to _applied_gen once processed, so _pump() can drain
+        # exactly until the latest interaction has landed (see _PlotAPI._pump).
+        _sel_gen = traitlets.Int(0).tag(sync=True)
+        _applied_gen = 0
+
+        @traitlets.observe("_sel_gen")
+        def _ack_sel_gen(self, change):
+            # Fires AFTER the selection/filter message it accompanies has been
+            # applied (the front-end bumps _sel_gen last), so matching gens means
+            # the kernel state is current.
+            self._applied_gen = int(change["new"] or 0)
 
         def update(self, spec: dict) -> "ReglScatter":
             self._spec = spec
