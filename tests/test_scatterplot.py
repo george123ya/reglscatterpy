@@ -25,6 +25,7 @@ def _toy_anndata(n=80, g=12):
     )
     adata = ad.AnnData(X=X, obs=obs, var=var)
     adata.obsm["X_umap"] = rng.randn(n, 2)
+    adata.obsm["X_tsne"] = rng.randn(n, 2)
     return adata
 
 
@@ -91,6 +92,35 @@ def test_raw_vector_color_is_not_a_grid(adata):
     col = np.repeat(["a", "b"], adata.n_obs // 2)   # ndarray -> raw vector
     w = rs.scatterplot(adata, basis="umap", color_by=col, show=False)
     assert type(w).__name__ != "GridBox"
+
+
+def test_basis_list_makes_grid(adata):
+    h = rs.scatterplot(adata, basis=["umap", "tsne"], color_by="celltype", show=False)
+    assert type(h).__name__ == "_HtmlGrid" and len(h.panels) == 2
+    assert {p._spec["title"] for p in h.panels} == {"umap", "tsne"}
+
+
+def test_basis_color_cross_product(adata):
+    w = rs.scatterplot(adata, basis=["umap", "tsne"], color_by=["celltype", "Gene3"],
+                       interactive=True, show=False)
+    assert "GridBox" in [c.__name__ for c in type(w).__mro__]
+    assert len(w.children) == 4
+    assert {c._spec["title"] for c in w.children} == {
+        "umap · celltype", "umap · Gene3", "tsne · celltype", "tsne · Gene3"}
+
+
+def test_panel_cap_raises(adata):
+    with pytest.raises(ValueError, match="exceeds"):
+        rs.scatterplot(adata, basis=["umap", "tsne"],
+                       color_by=[f"Gene{i}" for i in range(9)],
+                       interactive=True, show=False)
+
+
+def test_alpha_is_global_opacity(adata):
+    w = rs.scatterplot(adata, basis="umap", color_by="celltype", alpha=0.3, show=False)
+    assert w._spec["options"]["opacity"] == 0.3
+    with pytest.raises(TypeError):
+        rs.scatterplot(adata, basis="umap", alpha=[0.3, 0.5], show=False)
 
 
 # --- Change 3: gene-aware size_by / opacity_by ----------------------------- #

@@ -715,6 +715,7 @@ def scatterplot(
     table: Optional[str] = None,
     point_size: Optional[float] = None,
     opacity: Optional[float] = None,
+    alpha: Optional[float] = None,   # scanpy alias for global opacity (0-1)
     point_color: Optional[str] = None,
     size_by: Any = None,
     opacity_by: Any = None,
@@ -782,6 +783,13 @@ def scatterplot(
         Embedding selector for single-cell objects (an ``obsm`` key, e.g.
         ``"umap"``/``"X_umap"``/``"pca"``; short names are auto-prefixed and
         matched case-insensitively). Preferred over ``x`` for embeddings.
+        Pass a **list** (e.g. ``["umap", "tsne"]``) for a linked multi-panel grid,
+        one panel per embedding. A list for ``basis`` AND ``color_by`` renders their
+        cross-product (one panel per basis×colour), capped at 16 panels.
+    alpha
+        Global point opacity (0–1), a scanpy alias for ``opacity`` applied to every
+        panel. For PER-POINT opacity use ``opacity_by``; ``alpha`` is a single
+        number and does not create panels.
     x, y
         For single-cell objects, ``x`` is an alias for ``basis`` (same meaning).
         For DataFrame / array inputs, ``x``/``y`` are the column names / indices
@@ -934,6 +942,13 @@ def scatterplot(
         continuous_palette = cmap
     if palette is not _UNSET:
         categorical_palette = palette
+    if alpha is not None:               # scanpy alias: global point opacity
+        if isinstance(alpha, (list, tuple)):
+            raise TypeError(
+                "alpha must be a single number (global opacity 0-1); for per-point "
+                "opacity use opacity_by=, and it does not create panels."
+            )
+        opacity = float(alpha)
     if components is not _UNSET and components is not None:
         dims = tuple(int(c) - 1 for c in components)   # 1-based -> 0-based
     _auto_max = (max_points == "auto")
@@ -951,13 +966,15 @@ def scatterplot(
         )
         pixel_ratio = 1.0
 
-    # A single-element colour list is just one plot — collapse it BEFORE the
-    # progressive/fan-out checks so color=["x"] still takes the progressive path.
+    # A single-element colour/basis list is just one plot — collapse it BEFORE the
+    # progressive/fan-out checks so color=["x"] / basis=["umap"] take the normal path.
     if _is_name_list(color_by) and len(color_by) == 1:
         color_by = color_by[0]
+    if isinstance(basis, (list, tuple)) and len(basis) == 1:
+        basis = basis[0]
 
     # --- progressive: subset now (instant), full streamed in the background ---
-    if progressive and not _is_name_list(color_by) and backend == "regl":
+    if progressive and not _is_name_list(color_by) and not isinstance(basis, (list, tuple)) and backend == "regl":
         import uuid
         interactive = True
         # detail-on-zoom ("in-memory tiling"): show a density-sketch overview, then
@@ -1114,18 +1131,39 @@ def scatterplot(
             f"{[c for c in _TOOLBAR_CHOICES if c is not None]} or None."
         )
 
-    # --- color_by as a list of names -> one linked panel per value ----------
-    if _is_name_list(color_by):
+    # --- basis and/or color_by as lists -> a linked grid over their cross-product --
+    basis_multi = isinstance(basis, (list, tuple))
+    color_multi = _is_name_list(color_by)
+    if basis_multi or color_multi:
         if backend != "regl":
             raise ValueError(
-                "color_by as a list of names (multi-panel grid) requires "
+                "A multi-panel grid (a list for basis= and/or color_by=) requires "
                 "backend='regl'."
             )
         from ._compose import compose
 
+        basis_list = list(basis) if basis_multi else [basis]
+        color_list = list(color_by) if color_multi else [color_by]
+        n_combo = len(basis_list) * len(color_list)
+        _CAP = 16
+        if n_combo > _CAP:
+            raise ValueError(
+                f"{len(basis_list)} basis × {len(color_list)} color_by = {n_combo} "
+                f"panels exceeds the {_CAP}-panel cap. Shorten one of the lists "
+                "(or call scatterplot separately per embedding)."
+            )
+
+        def _panel_title(b, c):
+            parts = []
+            if basis_multi:
+                parts.append(str(b))
+            if color_multi:
+                parts.append(str(c))
+            return title or " · ".join(parts) or None
+
         panels = [
             scatterplot(
-                data, basis=basis, x=x, y=y, color_by=name, group_by=group_by,
+                data, basis=b, x=x, y=y, color_by=c, group_by=group_by,
                 layer=layer, use_raw=use_raw, dims=dims, table=table, point_size=point_size,
                 opacity=opacity, point_color=point_color, size_by=size_by,
                 opacity_by=opacity_by, tooltip_by=tooltip_by,
@@ -1141,11 +1179,12 @@ def scatterplot(
                 # each panel a different order -> a lasso/filter in one panel would hit
                 # the wrong cells in the others. Force a colour-independent shared order
                 # (subsample/random_state are identical across panels; only the value-
-                # sort differs, so we drop it here).
+                # sort differs, so we drop it here). NB: different bases have different
+                # coordinates but the SAME cell rows, so positional sync still holds.
                 sort_order=False, random_state=random_state, max_points=max_points,
                 subsample=subsample,
                 progressive=progressive, progressive_opts=progressive_opts,
-                title=(title or name), xlab=xlab, ylab=ylab,
+                title=_panel_title(b, c), xlab=xlab, ylab=ylab,
                 legend_title=legend_title, show_axes=show_axes,
                 show_tooltip=show_tooltip, background_color=background_color,
                 axis_color=axis_color, legend_bg=legend_bg, legend_text=legend_text,
@@ -1163,9 +1202,14 @@ def scatterplot(
                 interactive=interactive, show=False,
                 **backend_kwargs,
             )
-            for name in color_by
+            # cross-product: rows = basis, cols = color (panels fill row-major)
+            for b in basis_list
+            for c in color_list
         ]
-        grid = compose(panels, cols=ncols)
+        # when BOTH are lists, width = #colours so each basis is its own row;
+        # otherwise let compose pick a near-square layout.
+        _cols = ncols or (len(color_list) if (basis_multi and color_multi) else None)
+        grid = compose(panels, cols=_cols)
         _maybe_save(grid, save)
         return grid
 
