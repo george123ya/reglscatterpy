@@ -110,7 +110,10 @@ def _bundle_call():
 
 
 def _state(widget):
-    spec = dict(getattr(widget, "_spec", {}) or {})
+    # Bake the CURRENT live view/selection/filter into the exported spec when the
+    # widget supports it (live interactive plots); otherwise the plain spec.
+    _snap = getattr(widget, "_snapshot_spec", None)
+    spec = _snap() if callable(_snap) else dict(getattr(widget, "_spec", {}) or {})
     if not spec:
         raise ValueError(
             "This widget has no plot spec to export "
@@ -259,7 +262,8 @@ def save_html(widget, path, title="reglscatterpy plot"):
         out.write_text(page, encoding="utf-8")
         return str(out)
 
-    spec = dict(getattr(widget, "_spec", {}) or {})
+    _snap = getattr(widget, "_snapshot_spec", None)   # bake current view/selection/filter
+    spec = _snap() if callable(_snap) else dict(getattr(widget, "_spec", {}) or {})
     page = (
         _PAGE.replace("__TITLE__", _html.escape(str(title)))
         .replace("__PAGEBG__", str(spec.get("backgroundColor") or "#ffffff"))

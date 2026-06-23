@@ -93,10 +93,36 @@ def _make_classes():
         def to_html(self, path, title="reglscatterpy plot"):
             """Save this plot as a standalone, offline HTML file (like R's
             ``htmlwidgets::saveWidget``) — inlines the bundle and data, stays
-            interactive with no kernel."""
+            interactive with no kernel. On a live (``interactive=True``) widget it
+            captures the CURRENT view / selection / filter so the file opens exactly
+            as you left it."""
             from ._export import save_html
 
             return save_html(self, path, title=title)
+
+        def _snapshot_spec(self):
+            """A copy of the spec with the CURRENT live camera / selection / filter
+            baked in, so an exported HTML opens as the interactive widget looks now.
+            (No live state -> identical to the plain spec.)"""
+            import copy
+            spec = copy.deepcopy(dict(getattr(self, "_spec", {}) or {}))
+            cam = list(getattr(self, "_camera", []) or [])
+            if cam:
+                spec["cameraView"] = [float(v) for v in cam]
+            sel = list(getattr(self, "_selection", []) or [])      # rendered positions
+            if sel:
+                spec["init_selected_indices"] = [int(p) for p in sel]
+            if getattr(self, "_filtered_on", False):               # filtered -> positions
+                keep = list(getattr(self, "_filtered", []) or [])  # original indices
+                perm = getattr(self, "_draw_order", None)
+                if perm is not None:
+                    inv = getattr(self, "_inv_draw_order", None)
+                    if inv is None:
+                        inv = {int(o): p for p, o in enumerate(perm)}
+                    spec["init_server_indices"] = [inv[o] for o in keep if o in inv]
+                else:
+                    spec["init_server_indices"] = [int(o) for o in keep]
+            return spec
 
         @property
         def selection(self):
@@ -432,6 +458,7 @@ def _make_classes():
         _selection = traitlets.List(trait=traitlets.Int()).tag(sync=True)
         _filtered = traitlets.List(trait=traitlets.Int()).tag(sync=True)
         _filtered_on = traitlets.Bool(False).tag(sync=True)
+        _camera = traitlets.List(trait=traitlets.Float()).tag(sync=True)
 
         def update(self, spec: dict) -> "ReglScatter":
             self._spec = spec
