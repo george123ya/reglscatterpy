@@ -348,34 +348,76 @@ def _lasso_payload(widget, polygon):
                     "select": _sel_positions(sel, panel._draw_order)})
 
 
-def _legend_filter_payload(widget, cats):
-    """Legend category filter, synced across linked panels by ORIGINAL cell: keep only
-    cells whose (clicked panel's categorical) colour is in ``cats``, mapped per panel.
-    Works cross-variable (other panels just hide the same cells) — unlike positional
-    sync, which breaks when panels draw in different orders."""
-    vp = getattr(widget, "_vp", None)
-    if not vp:
-        return
+def _compute_filter_keep(vp):
+    """Intersect the active legend-category AND range-slider filters over the FULL
+    dataset. Returns kept ORIGINAL indices (np.int64 array) or None when nothing is
+    filtering (so w.filtered / the plot show every cell)."""
+    mask = None
+    # legend categories (clicked panel's categorical colour)
+    cats = vp.get("filter_cats")
     codes, levels = vp.get("color_codes"), vp.get("color_levels")
-    if codes is None or levels is None:
-        return
-    if not cats:
-        keep_orig = None                             # cleared -> show all
-    else:
+    if cats and codes is not None and levels is not None:
         want = {str(c) for c in cats}
         sel_codes = np.array([i for i, lv in enumerate(levels) if lv in want],
                              dtype=np.int64)
-        # ORIGINAL cells to keep, as a numpy array (NOT a Python set of millions).
-        keep_orig = np.where(np.isin(np.asarray(codes), sel_codes))[0]
-    # share the same original-cell keep across linked panels; each maps it to its
-    # own displayed cells via vectorised isin (cross-variable + fast).
+        m = np.isin(np.asarray(codes), sel_codes)
+        mask = m if mask is None else (mask & m)
+    # range sliders over the pre-extracted FULL filter columns (vp["full_filter"])
+    ranges = vp.get("filter_ranges") or {}
+    ff = vp.get("full_filter")
+    if ranges and ff is not None:
+        cols = getattr(ff, "columns", [])
+        for col, rng in ranges.items():
+            if rng is None or col not in cols:
+                continue
+            vals = np.asarray(ff[col], dtype="float64")
+            m = (vals >= float(rng[0])) & (vals <= float(rng[1]))
+            mask = m if mask is None else (mask & m)
+    return None if mask is None else np.where(mask)[0]
+
+
+def _apply_progressive_filters(widget):
+    """Recompute the combined keep on the acting panel and share it (by ORIGINAL
+    cell) to every linked panel, pushing each a vp_filter to redraw its in-view
+    subset. Sets vp["filter_keep"] — the source w.filtered reads."""
+    vp = getattr(widget, "_vp", None)
+    if not vp:
+        return
+    keep = _compute_filter_keep(vp)
     for panel in (vp.get("group") or [widget]):
         pvp = getattr(panel, "_vp", None)
         if pvp is None:
             continue
-        pvp["filter_keep"] = keep_orig
-        panel.send({"type": "vp_filter",
-                    "keep": _keep_positions(pvp, panel._draw_order)})
+        pvp["filter_keep"] = keep
+        try:
+            panel.send({"type": "vp_filter",
+                        "keep": _keep_positions(pvp, panel._draw_order)})
+        except Exception:
+            pass
+
+
+def _legend_filter_payload(widget, cats):
+    """Legend category filter (progressive): store the kept categories, then re-apply
+    the combined (category ∩ range) filter over the FULL dataset, synced by ORIGINAL
+    cell across linked panels (cross-variable — others just hide the same cells)."""
+    vp = getattr(widget, "_vp", None)
+    if not vp:
+        return
+    vp["filter_cats"] = list(cats) if cats else None
+    _apply_progressive_filters(widget)
+
+
+def _range_filter_payload(widget, ranges):
+    """Range-slider filter (progressive): store the per-column [lo, hi] ranges, then
+    re-apply the combined filter over the FULL dataset — so w.filtered and the plot
+    reflect every cell in range, not just the drawn subset."""
+    vp = getattr(widget, "_vp", None)
+    if not vp:
+        return
+    vp["filter_ranges"] = {str(k): [float(v[0]), float(v[1])]
+                           for k, v in (ranges or {}).items()
+                           if v is not None and len(v) == 2}
+    _apply_progressive_filters(widget)
 
 
 def _viewport_handler(widget, content, buffers):
@@ -421,6 +463,8 @@ def _viewport_handler(widget, content, buffers):
                         pass
         elif t == "legend_filter":
             _legend_filter_payload(widget, content.get("cats"))
+        elif t == "range_filter":
+            _range_filter_payload(widget, content.get("ranges"))
     except Exception:
         # Detail-on-zoom must never wedge the UI: log for diagnosis (silent by
         # default; surfaces under logging.basicConfig(level=DEBUG)) and clear the
