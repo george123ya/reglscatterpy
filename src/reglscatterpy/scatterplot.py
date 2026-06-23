@@ -952,9 +952,31 @@ def scatterplot(
             # ORIGINAL cells and sync across linked panels.
             _ccodes = _clevels = None
             if _full.color is not None and _lg.get("var_type") == "categorical":
-                _ccat = pd.Categorical(pd.Series(_full.color).astype(str))
+                # The overview spec's legend was derived from the density-sketch
+                # SUBSAMPLE, so its LEVELS can miss categories absent from the sketch
+                # and its COUNTS reflect only the subsample. Rebuild the legend from
+                # the FULL dataset (same NA/groups/palette rules as build_payload) so
+                # names, colours and counts are all real. This also gives the legend
+                # filter the full level/code set. The JS reads the legend once from
+                # the spec (never recomputed per-viewport), so this sticks.
+                from ._payload import _resolve_categorical_palette
+                _s = pd.Series(_full.color).astype("object")
+                if _s.isna().any():
+                    _s = _s.where(_s.notna(), "NA")
+                _ccat = pd.Categorical(_s.astype(str))
                 _ccodes = _ccat.codes
                 _clevels = [str(c) for c in _ccat.categories]
+                _cols = _resolve_categorical_palette(
+                    _clevels, custom_colors, custom_palette, categorical_palette)
+                _keep = None if groups is None else {str(g) for g in groups}
+                for _i, _lv in enumerate(_clevels):
+                    if _lv == "NA" or (_keep is not None and _lv not in _keep):
+                        _cols[_i] = na_color
+                _fc = (pd.Series(_ccat).value_counts()
+                       .reindex(_ccat.categories).fillna(0).astype("int64"))
+                _lg = {**_lg, "names": _clevels, "colors": _cols,
+                       "counts": [int(c) for c in _fc.to_numpy()]}
+                w._spec = {**w._spec, "legend": _lg}
             w._vp = {"data": data, "base": base, "bk": bk, "budget": budget,
                      "x": _fx, "y": _fy,
                      # full pre-extracted channels -> each viewport numpy-indexes
