@@ -170,7 +170,7 @@ def _make_classes():
 
         def subset(self, selection=None):
             """The source object subset to the selected cells (``adata[w.selection]``)."""
-            sel = self.selection if selection is None else [int(i) for i in selection]
+            sel = self.selection if selection is None else self._resolve_orig_indices(selection)
             src = getattr(self, "_source", None)
             if src is None:
                 raise ValueError("This plot has no source object to subset.")
@@ -184,7 +184,7 @@ def _make_classes():
             import numpy as np
             import pandas as pd
 
-            sel = self.selection if selection is None else [int(i) for i in selection]
+            sel = self.selection if selection is None else self._resolve_orig_indices(selection)
             src = getattr(self, "_source", None)
             if src is None:
                 raise ValueError(
@@ -214,7 +214,7 @@ def _make_classes():
             """Count + fraction of the selected cells in each category of ``by``."""
             import pandas as pd
 
-            sel = self.selection if selection is None else [int(i) for i in selection]
+            sel = self.selection if selection is None else self._resolve_orig_indices(selection)
             if not sel:
                 raise ValueError("Nothing selected - lasso some points first.")
             src = getattr(self, "_source", None)
@@ -229,14 +229,18 @@ def _make_classes():
             return out
 
         def diff_expression(self, group_a=None, group_b=None, n=10, layer=None,
-                            method="wilcoxon"):
+                            method="wilcoxon", key_added=None):
             """Top differential genes between two cell groups.
 
             ``group_a`` defaults to the lasso selection; ``group_b`` to the rest.
-            When **scanpy** is installed (and the source is an AnnData) this runs
+            Groups accept integer positions, obs_names, or a boolean mask. When
+            **scanpy** is installed (and the source is an AnnData) this runs
             ``sc.tl.rank_genes_groups`` on a copy and returns its result frame
             (names / scores / logfoldchanges / pvals / pvals_adj). Otherwise it
             falls back to a Welch t-test. AnnData/MuData only.
+
+            ``key_added`` — if given, also store the result frame in
+            ``adata.uns[key_added]`` so you can retrieve it later.
             """
             import numpy as np
             import pandas as pd
@@ -245,15 +249,20 @@ def _make_classes():
             if src is None or not hasattr(src, "X"):
                 raise TypeError("diff_expression() needs an AnnData/MuData with .X.")
             n_obs = src.n_obs
-            a_idx = self.selection if group_a is None else [int(i) for i in group_a]
+            a_idx = self.selection if group_a is None else self._resolve_orig_indices(group_a)
             if not a_idx:
                 raise ValueError("Group A is empty - lasso some cells first.")
             labels = np.array(["rest"] * n_obs, dtype=object)
             labels[a_idx] = "A"
             ref = "rest"
             if group_b is not None:
-                labels[[int(i) for i in group_b]] = "B"
+                labels[self._resolve_orig_indices(group_b)] = "B"
                 ref = "B"
+
+            def _save(df):
+                if key_added is not None and hasattr(src, "uns"):
+                    src.uns[key_added] = df
+                return df
 
             # Preferred path: scanpy's rank_genes_groups (AnnData only).
             if type(src).__name__ == "AnnData":
@@ -266,7 +275,7 @@ def _make_classes():
                         ad, "_rs_grp", groups=["A"], reference=ref,
                         method=method, layer=layer, n_genes=n,
                     )
-                    return sc.get.rank_genes_groups_df(ad, group="A").head(n).reset_index(drop=True)
+                    return _save(sc.get.rank_genes_groups_df(ad, group="A").head(n).reset_index(drop=True))
                 except ImportError:
                     pass  # fall back to the built-in test below
 
@@ -291,7 +300,7 @@ def _make_classes():
                 "mean_A": ma, "mean_B": mb,
             })
             res = res.reindex(res["stat"].abs().sort_values(ascending=False).index)
-            return res.head(n).reset_index(drop=True)
+            return _save(res.head(n).reset_index(drop=True))
 
         def __repr__(self):
             spec = getattr(self, "_spec", None) or {}
