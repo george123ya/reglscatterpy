@@ -157,13 +157,14 @@ def _make_classes():
                 n = len(vp["x"]) if (vp and "x" in vp) else 0
             except Exception:
                 n = 0
-            # min_settle is the ARRIVAL window: the front-end bumps _sel_gen FIRST
-            # (a tiny "request" sent before the heavy message), so within this window
-            # the pump sees gen rise above _applied_gen and KNOWS to keep waiting —
-            # up to `cap` — until the kernel work acks. Without the window an
-            # immediate read sees the stale (pre-bump) gen == applied and exits early.
-            # cap scales with size: a 10M-point select-all runs synchronously in the
-            # comm handler for seconds and far exceeds a flat 2s.
+            # min_settle is the ARRIVAL window: the front-end bumps its request
+            # counters (a tiny message sent before any heavy work), so within this
+            # window the pump sees a bump and KNOWS to keep waiting — up to `cap` —
+            # until the kernel acks. Without the window an immediate read sees the
+            # stale (pre-bump) counters "caught up" and exits early. When nothing is
+            # pending both barriers are already satisfied, so the read returns right
+            # after min_settle (no over-block). cap scales with size: a 10M-point
+            # select-all runs synchronously in the comm handler for seconds.
             min_settle = 0.4
             cap = min(30.0, max(3.0, (n / 1_000_000.0) * 4.0))
             import time as _t
@@ -175,8 +176,11 @@ def _make_classes():
                         elapsed = _t.monotonic() - start
                         gen = int(getattr(self, "_sel_gen", 0) or 0)
                         applied = int(getattr(self, "_applied_gen", 0) or 0)
-                        if applied >= gen and elapsed >= min_settle:
-                            break                 # caught up AND waited for in-flight
+                        wreq = int(getattr(self, "_work_req", 0) or 0)
+                        wdone = int(getattr(self, "_work_done", 0) or 0)
+                        caught = applied >= gen and wdone >= wreq
+                        if caught and elapsed >= min_settle:
+                            break                 # nothing pending (or all applied)
                         if elapsed >= cap:
                             break                 # give up (kernel stuck) -> stale
                         _t.sleep(0.012)
@@ -520,25 +524,25 @@ def _make_classes():
         _filtered = traitlets.List(trait=traitlets.Int()).tag(sync=True)
         _filtered_on = traitlets.Bool(False).tag(sync=True)
         _camera = traitlets.List(trait=traitlets.Float()).tag(sync=True)
-        # Request counter the front-end bumps FIRST on every selection/filter commit
-        # (before the data/work message). The kernel acks it to _applied_gen only
-        # AFTER the work completes, so _PlotAPI._pump() blocks until the interaction
-        # has actually landed — not merely been requested. Progressive panels ack
-        # inside their kernel work handlers (_lasso_payload / _legend_filter_payload /
-        # the deselect+reset branches / _on_user_sel); the observers below ack the
-        # NON-progressive path, where the trait IS the result.
+        # Two barriers let a synchronous w.selection/w.filtered read wait for the
+        # latest interaction WITHOUT over-blocking when idle:
+        #   _sel_gen  -> bumped by the front-end on EVERY interaction (light + heavy).
+        #                The observer acks it immediately and reliably (it fires on
+        #                the counter itself, which always changes — unlike a
+        #                _selection observer that's silent on an unchanged value).
+        #                This is the liveness signal: idle => _applied_gen == _sel_gen.
+        #   _work_req -> bumped BEFORE the heavy async work (a 10M-point lasso /
+        #                legend filter / deselect / reset). The kernel sets _work_done
+        #                only AFTER that work finishes (_ack_work), so the pump blocks
+        #                for completion, not just delivery.
         _sel_gen = traitlets.Int(0).tag(sync=True)
         _applied_gen = 0
+        _work_req = traitlets.Int(0).tag(sync=True)
+        _work_done = 0
 
-        @traitlets.observe("_selection")
-        def _ack_selection(self, change):
-            if getattr(self, "_vp", None) is None:      # non-progressive only
-                self._applied_gen = int(getattr(self, "_sel_gen", 0) or 0)
-
-        @traitlets.observe("_filtered")
-        def _ack_filtered(self, change):
-            if getattr(self, "_vp", None) is None:      # non-progressive only
-                self._applied_gen = int(getattr(self, "_sel_gen", 0) or 0)
+        @traitlets.observe("_sel_gen")
+        def _ack_gen(self, change):
+            self._applied_gen = int(change["new"] or 0)
 
         def update(self, spec: dict) -> "ReglScatter":
             self._spec = spec

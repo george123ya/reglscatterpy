@@ -315,13 +315,14 @@ def _points_in_polygon(fx, fy, poly):
         return inside
 
 
-def _ack_gen(widget):
-    """Mark the front-end's latest request (_sel_gen) as APPLIED now that this
-    progressive work handler has finished, so a synchronous w.selection/w.filtered
-    read can stop blocking (see _PlotAPI._pump). The non-progressive path acks via
-    traitlets observers on _selection/_filtered instead."""
+def _ack_work(widget):
+    """Mark the front-end's latest HEAVY-work request (_work_req) as DONE now that
+    this async handler has finished, so a synchronous w.selection/w.filtered read
+    blocks for completion rather than just delivery (see _PlotAPI._pump). Light
+    interactions (clicks / non-progressive trait sets) use the _sel_gen barrier,
+    which the kernel acks automatically."""
     try:
-        widget._applied_gen = int(getattr(widget, "_sel_gen", 0) or 0)
+        widget._work_done = int(getattr(widget, "_work_req", 0) or 0)
     except Exception:
         pass
 
@@ -345,7 +346,6 @@ def _lasso_payload(widget, polygon):
         panel._source = pvp["data"]
         panel.send({"type": "vp_select",
                     "select": _sel_positions(sel, panel._draw_order)})
-    _ack_gen(widget)                                 # work done -> unblock w.selection
 
 
 def _legend_filter_payload(widget, cats):
@@ -376,7 +376,6 @@ def _legend_filter_payload(widget, cats):
         pvp["filter_keep"] = keep_orig
         panel.send({"type": "vp_filter",
                     "keep": _keep_positions(pvp, panel._draw_order)})
-    _ack_gen(widget)                                 # work done -> unblock w.filtered
 
 
 def _viewport_handler(widget, content, buffers):
@@ -401,7 +400,6 @@ def _viewport_handler(widget, content, buffers):
                                 _panel.send({"type": "vp_select", "select": []})
                             except Exception:
                                 pass
-                _ack_gen(widget)             # reset bumps gen -> unblock a pending read
             _viewport_payload(widget, content["bounds"], seq=content.get("seq"))
         elif t == "lasso":
             _lasso_payload(widget, content.get("polygon"))
@@ -421,7 +419,6 @@ def _viewport_handler(widget, content, buffers):
                         _panel.send({"type": "vp_select", "select": []})
                     except Exception:
                         pass
-            _ack_gen(widget)                          # cleared -> unblock w.selection
         elif t == "legend_filter":
             _legend_filter_payload(widget, content.get("cats"))
     except Exception:
@@ -433,6 +430,13 @@ def _viewport_handler(widget, content, buffers):
             widget.send({"type": "vp_noop"})
         except Exception:
             pass
+    finally:
+        # ANY processed message (incl. early-returns / errors) marks the heavy-work
+        # request done, so a synchronous read can never hang to the cap waiting on a
+        # handler that skipped its ack. A plain pan didn't bump _work_req, so this is
+        # a no-op there; the front-end keeps _work_req ahead only until its message
+        # is processed (FIFO: the bump rides immediately before the work message).
+        _ack_work(widget)
 
 
 def _resolve_filter_by(filter_by, data):
@@ -1001,7 +1005,6 @@ def scatterplot(
                     vp["showing_overview"] = False   # rebuild overview∪selection next zoom-out
                 except Exception:
                     _log.debug("selection observer failed", exc_info=True)
-                _ack_gen(_w)                          # work done -> unblock the read
             w.observe(_on_user_sel, names="_selection")
 
             def _mk_grid(_w=w, _fx=_fx, _fy=_fy):
