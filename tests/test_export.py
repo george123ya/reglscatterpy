@@ -22,7 +22,7 @@ def _widget():
             "ct": np.random.choice(list("ABC"), 120),
         }
     )
-    return rs.scatterplot(df, x="x", y="y", color_by="ct")
+    return rs.scatterplot(df, x="x", y="y", color_by="ct", interactive=False)
 
 
 def test_save_html_writes_self_contained_file(tmp_path):

@@ -757,7 +757,7 @@ def scatterplot(
     width: Optional[int] = 700,
     height: int = 500,
     backend: str = "regl",
-    interactive: bool = False,
+    interactive: bool = True,
     progressive: bool = False,      # density-sketch overview + full detail as you zoom in (for >~4M points)
     progressive_opts: Optional[dict] = None,  # tuning: {"detail_max_points": int, "overscan": float}
     _fast: bool = False,            # internal: binary channel transfer (auto for live regl widgets)
@@ -834,9 +834,11 @@ def scatterplot(
         visible with reasonably large points (use it for small/medium plots, not
         20M-cell atlases where points are ~1px).
     interactive
-        ``True`` returns the live, kernel-linked widget (needed for
-        ``w.selection`` / ``subset`` / ``annotate`` / linked ``compose``).
-        The default is a self-contained static snapshot.
+        ``True`` (the default) returns the live, kernel-linked widget — needed for
+        ``w.selection`` / ``subset`` / ``annotate`` / linked ``compose`` and for
+        reading interactions back into Python. Set ``interactive=False`` for a
+        self-contained static snapshot (an iframe that renders anywhere, e.g. a
+        server without the Jupyter widgets frontend, but with no kernel link).
     progressive
         For datasets beyond ~4M: show a density-sketch overview and re-render all
         cells inside the viewport as you zoom in (detail-on-zoom, no

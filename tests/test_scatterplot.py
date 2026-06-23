@@ -51,9 +51,15 @@ def test_basis_on_dataframe_raises():
         rs.scatterplot(df, x="u1", y="u2", basis="umap", show=False)
 
 
-# --- Static-by-default render (no widget) ---------------------------------- #
-def test_default_render_is_static_iframe(adata):
+# --- Render mode: interactive by default, static when opted out ------------ #
+def test_default_render_is_interactive(adata):
     w = rs.scatterplot(adata, basis="umap", color_by="celltype", show=False)
+    from reglscatterpy import _widget
+    assert _widget.is_live_widget(w)   # interactive=True is the default now
+
+
+def test_static_render_is_iframe(adata):
+    w = rs.scatterplot(adata, basis="umap", color_by="celltype", interactive=False, show=False)
     bundle = w._repr_mimebundle_()
     data = bundle[0] if isinstance(bundle, tuple) else bundle
     assert "text/html" in data
@@ -75,7 +81,7 @@ def test_interactive_render_is_live_widget(adata):
 # --- Change 2: color_by list -> linked grid -------------------------------- #
 def test_color_by_list_makes_linked_grid(adata):
     # default (static) -> an HTML iframe-grid that renders without ipywidgets
-    h = rs.scatterplot(adata, basis="umap", color_by=["celltype", "Gene3"], show=False)
+    h = rs.scatterplot(adata, basis="umap", color_by=["celltype", "Gene3"], interactive=False, show=False)
     assert type(h).__name__ == "_HtmlGrid"
     assert len(h.panels) == 2 and "text/html" in h._repr_mimebundle_()
     # interactive=True -> a linked live GridBox
@@ -95,7 +101,7 @@ def test_raw_vector_color_is_not_a_grid(adata):
 
 
 def test_basis_list_makes_grid(adata):
-    h = rs.scatterplot(adata, basis=["umap", "tsne"], color_by="celltype", show=False)
+    h = rs.scatterplot(adata, basis=["umap", "tsne"], color_by="celltype", interactive=False, show=False)
     assert type(h).__name__ == "_HtmlGrid" and len(h.panels) == 2
     assert {p._spec["title"] for p in h.panels} == {"umap", "tsne"}
 
@@ -268,8 +274,8 @@ def test_cmap_and_palette_aliases(adata):
 
 def test_compose_accepts_plain_plots(adata):
     from reglscatterpy import _widget
-    a = rs.scatterplot(adata, basis="umap", color="celltype")   # static
-    b = rs.scatterplot(adata, basis="umap", color="Gene3")
+    a = rs.scatterplot(adata, basis="umap", color="celltype", interactive=False)   # static
+    b = rs.scatterplot(adata, basis="umap", color="Gene3", interactive=False)
     g = rs.compose([a, b])                                        # static -> HTML grid
     assert type(g).__name__ == "_HtmlGrid"
     assert len(g.panels) == 2 and "text/html" in g._repr_mimebundle_()
@@ -288,7 +294,7 @@ def test_single_element_color_list_is_single_plot(adata):
 
 def test_ncols_in_grid(adata):
     g = rs.scatterplot(adata, basis="umap", color=["celltype", "Gene3", "Gene4"],
-                       ncols=3, show=False)
+                       ncols=3, interactive=False, show=False)
     assert g._cols == 3   # the static HTML grid lays out in 3 columns
 
 
