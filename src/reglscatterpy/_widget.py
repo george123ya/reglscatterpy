@@ -74,9 +74,46 @@ def _make_classes():
                 return [int(perm[p]) for p in sel if 0 <= p < len(perm)]
             return [int(p) for p in sel]
 
+        def _resolve_orig_indices(self, indices):
+            """Coerce a selection-like input to ORIGINAL integer indices. Accepts
+            integer positions, obs_names / DataFrame index labels (strings), or a
+            boolean mask (length == n)."""
+            import numpy as np
+            if indices is None:
+                return []
+            seq = list(indices)
+            if not seq:
+                return []
+            first = seq[0]
+            if isinstance(first, (bool, np.bool_)):
+                return [int(i) for i, b in enumerate(seq) if b]
+            if isinstance(first, (int, np.integer)):
+                return [int(i) for i in seq]
+            # names (e.g. adata[mask].obs_names) -> positions in the source
+            src = getattr(self, "_source", None)
+            names = None
+            if src is not None:
+                if hasattr(src, "obs_names"):
+                    names = list(src.obs_names)
+                elif hasattr(src, "index"):
+                    names = list(src.index)
+            if names is None:
+                raise TypeError(
+                    "selecting by name needs the original AnnData/DataFrame "
+                    "(obs_names / index); pass integer positions instead."
+                )
+            pos = {n: i for i, n in enumerate(names)}
+            missing = [n for n in seq if n not in pos]
+            if missing:
+                raise KeyError(
+                    f"{len(missing)} name(s) not found in obs_names, "
+                    f"e.g. {missing[:3]}."
+                )
+            return [pos[n] for n in seq]
+
         @selection.setter
         def selection(self, indices):
-            idx = [int(i) for i in (indices or [])]
+            idx = self._resolve_orig_indices(indices)
             perm = getattr(self, "_draw_order", None)
             if perm is not None:
                 inv = getattr(self, "_inv_draw_order", None)
@@ -109,7 +146,7 @@ def _make_classes():
             Note: with ``progressive=True`` the highlight marks the currently-shown
             cells; it doesn't yet follow new cells streamed in on zoom.
             """
-            idx = [int(i) for i in (indices or [])]
+            idx = self._resolve_orig_indices(indices)
             perm = getattr(self, "_draw_order", None)
             if perm is not None:
                 inv = getattr(self, "_inv_draw_order", None)

@@ -404,6 +404,30 @@ def _viewport_handler(widget, content, buffers):
             pass
 
 
+def _resolve_filter_by(filter_by, data):
+    """Allow ``filter_by`` to be obs/column NAMES (a str or list of str), or ``True``
+    for every numeric obs column — not only a pre-built dict / DataFrame."""
+    if filter_by is None or filter_by is False or isinstance(filter_by, (pd.DataFrame, dict)):
+        return None if filter_by is False else filter_by
+    obs = getattr(data, "obs", None)
+    table = obs if obs is not None else (data if isinstance(data, pd.DataFrame) else None)
+    if table is None:
+        return filter_by                                  # no table to resolve names against
+    if filter_by is True:                                 # every numeric obs column
+        num = table.select_dtypes(include="number")
+        return num if num.shape[1] else None
+    if isinstance(filter_by, str):
+        filter_by = [filter_by]
+    if (isinstance(filter_by, (list, tuple)) and filter_by
+            and all(isinstance(c, str) for c in filter_by)):
+        missing = [c for c in filter_by if c not in table.columns]
+        if missing:
+            raise _not_found("filter_by", missing[0], list(table.columns),
+                             searched="obs / DataFrame columns")
+        return table[list(filter_by)]
+    return filter_by                                      # arrays etc. -> validated downstream
+
+
 def _rgb01(c, fallback=(0.0, 0.0, 0.0)):
     """A colour name / hex string -> normalised (r, g, b) in 0..1 for a GL uniform."""
     try:
@@ -703,8 +727,10 @@ def scatterplot(
     custom_colors, custom_palette
         Explicit per-level mapping (dict) or ordered list of colours.
     filter_by
-        A dict / DataFrame of numeric columns shown as interactive range
-        filters.
+        Numeric columns shown as interactive range-filter sliders. Give a
+        dict / DataFrame, **or just obs / column name(s)** (a str or list of str)
+        to pull them from ``adata.obs`` automatically, or ``True`` for every
+        numeric ``obs`` column.
     max_points
         Cap on points actually drawn (huge data stays interactive). ``"auto"``
         (default) caps at 500k via a density-preserving subsample; ``None`` draws
@@ -776,6 +802,22 @@ def scatterplot(
         if "overscan" in _dep:
             progressive_opts = {**(progressive_opts or {}), "overscan": _dep["overscan"]}
 
+    # Fail fast on a misspelled / unknown argument (e.g. interactive_mode, color_bys)
+    # instead of silently swallowing it and plotting the wrong thing. Only the
+    # jscatter backend legitimately forwards extra kwargs.
+    if backend != "jscatter" and backend_kwargs:
+        import difflib
+        import inspect
+        _valid = [p for p, par in inspect.signature(scatterplot).parameters.items()
+                  if par.kind is not par.VAR_KEYWORD and not p.startswith("_")]
+        _bad = next(iter(backend_kwargs))
+        _sugg = difflib.get_close_matches(_bad, _valid, n=1)
+        raise TypeError(
+            f"scatterplot() got an unexpected keyword argument {_bad!r}"
+            + (f". Did you mean {_sugg[0]!r}?" if _sugg else "")
+            + " (extra keyword arguments are only forwarded when backend='jscatter')."
+        )
+
     # `_detail_on_zoom` is the INTERNAL engine behind `progressive=` (it wires up
     # the viewport round-trip). A user reaching it directly — without progressive —
     # would get viewport messages with no handler, i.e. an endless spinner. Promote
@@ -794,6 +836,10 @@ def scatterplot(
     _popts = progressive_opts or {}
     _detail_max_points = _popts.get("detail_max_points")
     _overscan = float(_popts.get("overscan", 0.6))
+
+    # filter_by may be obs/column NAMES (str / list) or True (all numeric obs) — pull
+    # the actual columns now so you don't have to hand-build a DataFrame.
+    filter_by = _resolve_filter_by(filter_by, data)
 
     # --- scanpy-style aliases win over the original names when given --------
     if color is not _UNSET:
