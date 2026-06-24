@@ -29,4 +29,4 @@ __all__ = [
     "PlotData",
     "__version__",
 ]
-__version__ = "0.6.27"
+__version__ = "0.6.28"
