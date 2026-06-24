@@ -307,12 +307,18 @@ def _make_classes():
         @property
         def colors(self):
             """The categorical colour map as ``{category: '#rrggbb'}`` (the rendered
-            palette). ``None`` for a continuous / single-colour plot. Save it
-            scanpy-style with e.g.
-            ``adata.uns['louvain_colors'] = list(w.colors.values())``."""
+            palette, including any in-plot recolours via the legend colorpicker).
+            ``None`` for a continuous / single-colour plot. Save it scanpy-style with
+            e.g. ``adata.uns['louvain_colors'] = list(w.colors.values())``."""
             lg = (getattr(self, "_spec", None) or {}).get("legend") or {}
             if lg.get("var_type") != "categorical":
                 return None
+            self._pump()    # pick up a just-made colorpicker edit
+            # a legend colorpicker recolour (synced back) overrides the spec palette
+            ec = list(getattr(self, "_legend_colors", []) or [])
+            en = list(getattr(self, "_legend_names", []) or [])
+            if ec and en and len(ec) == len(en):
+                return dict(zip(en, ec))
             return dict(zip(lg.get("names", []), lg.get("colors", [])))
 
         def morph_to(self, basis, duration=1200):
@@ -346,13 +352,18 @@ def _make_classes():
             xb = _q_u16(_normalise_range(x, xr[0], xr[1]))
             yb = _q_u16(_normalise_range(y, yr[0], yr[1]))
             lbl = key[2:] if key[:2].lower() == "x_" else key
+            # ship the channels as memoryviews (matches the viewport binary path the
+            # front-end already decodes; raw bytes can arrive in a shape the u16
+            # decoder mis-reads -> a silent no-op).
             self.send(
                 {"type": "morph", "duration": int(duration), "n": int(x.size),
                  "x_min": xr[0], "x_max": xr[1], "y_min": yr[0], "y_max": yr[1],
                  "xlab": "%s 1" % lbl, "ylab": "%s 2" % lbl},
-                buffers=[xb.tobytes(), yb.tobytes()],
+                buffers=[memoryview(np.ascontiguousarray(xb)),
+                         memoryview(np.ascontiguousarray(yb))],
             )
-            return self
+            # NB: returns None on purpose — returning self would make Jupyter render a
+            # SECOND copy of the widget in the cell output.
 
         def highlight(self, indices, color=None):
             """Persistently mark points with a crisp ring + size bump (the engine's
@@ -604,6 +615,9 @@ def _make_classes():
         _applied_gen = 0
         _work_req = traitlets.Int(0).tag(sync=True)
         _work_done = 0
+        # set by the legend colorpicker so w.colors reflects an in-plot recolour
+        _legend_colors = traitlets.List(trait=traitlets.Unicode()).tag(sync=True)
+        _legend_names = traitlets.List(trait=traitlets.Unicode()).tag(sync=True)
 
         @traitlets.observe("_sel_gen")
         def _ack_gen(self, change):
