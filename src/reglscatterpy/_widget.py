@@ -26,7 +26,15 @@ import pathlib
 
 __all__ = ["ReglScatter", "StaticPlot", "is_live_widget"]
 
-_STATIC = pathlib.Path(__file__).parent / "static" / "widget.js"
+_STATIC_PATH = pathlib.Path(__file__).parent / "static" / "widget.js"
+# Pass the ESM as a CONTENT STRING (not a Path): the front-end module cache then
+# keys on the content, so a new build/version loads fresh instead of being shadowed
+# by a stale cached bundle (notably in the VS Code webview, which otherwise serves
+# the old JS even after a reinstall + kernel restart).
+try:
+    _STATIC = _STATIC_PATH.read_text(encoding="utf-8")
+except Exception:               # fall back to the Path (e.g. file not yet built)
+    _STATIC = _STATIC_PATH
 
 
 class _SelectionResult(list):
