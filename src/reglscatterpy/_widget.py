@@ -462,7 +462,7 @@ def _make_classes():
             return out
 
         def diff_expression(self, group_a=None, group_b=None, n=10, layer=None,
-                            method="wilcoxon", key_added=None, use_raw=False):
+                            method="wilcoxon", key_added=None, use_raw=None):
             """Top differential genes between two cell groups.
 
             ``group_a`` defaults to the lasso selection; ``group_b`` to the rest.
@@ -508,17 +508,55 @@ def _make_classes():
             if type(src).__name__ == "AnnData":
                 try:
                     import scanpy as sc
+                    import warnings
 
                     ad = src.copy()
                     ad.obs["_rs_grp"] = pd.Categorical(labels)
                     _key = _save_to or "rank_genes_groups"
+
+                    # Pick the expression matrix. logfoldchanges need NON-NEGATIVE
+                    # (log-normalised) values; running on a SCALED / z-scored .X
+                    # (which has negatives) makes scanpy emit NaN logFC. When the
+                    # caller didn't pin a source and .X looks scaled, route to
+                    # log-norm expression for the SAME genes (adata.raw restricted
+                    # to var_names) so logFC is finite without dragging in non-HVG
+                    # genes; fall back to a log-norm layer, else warn.
+                    _layer, _ur = layer, use_raw
+                    if _ur is None and _layer is None:
+                        def _neg(x):
+                            try:
+                                import scipy.sparse as _sp
+                                if _sp.issparse(x):
+                                    return x.data.size > 0 and float(x.data.min()) < -1e-6
+                            except Exception:
+                                pass
+                            a = np.asarray(x)
+                            return a.size > 0 and float(np.nanmin(a)) < -1e-6
+
+                        if not _neg(ad.X):
+                            _ur = False                                  # .X already log-norm
+                        elif ad.raw is not None and set(ad.var_names).issubset(set(ad.raw.var_names)):
+                            ad.layers["_rs_lognorm"] = ad.raw[:, list(ad.var_names)].X
+                            _layer, _ur = "_rs_lognorm", False           # finite logFC, same genes
+                        else:
+                            _cand = next((ln for ln in ("lognorm", "log1p", "logcounts", "data")
+                                          if ln in ad.layers and not _neg(ad.layers[ln])), None)
+                            if _cand is not None:
+                                _layer, _ur = _cand, False
+                            else:
+                                _ur = False
+                                warnings.warn(
+                                    "diff_expression: adata.X looks scaled (z-scored), so scanpy's "
+                                    "logfoldchanges will be NaN (the scores / p-values are still "
+                                    "valid). For finite logFC, set `adata.raw = adata` on the "
+                                    "log-normalised data before scaling, or pass a log-norm `layer=`.",
+                                    stacklevel=2,
+                                )
+
                     sc.tl.rank_genes_groups(
                         ad, "_rs_grp", groups=["A"], reference=ref,
-                        method=method, layer=layer, n_genes=n, key_added=_key,
-                        # default to .X (the matrix the plot colours by); scanpy
-                        # otherwise uses adata.raw when present, a different gene
-                        # space that often introduces NaNs / unexpected genes.
-                        use_raw=use_raw,
+                        method=method, layer=_layer, n_genes=n, key_added=_key,
+                        use_raw=_ur,
                     )
                     df = sc.get.rank_genes_groups_df(ad, group="A", key=_key).head(n).reset_index(drop=True)
                     # store the scanpy-NATIVE uns structure on the real adata, so
