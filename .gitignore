@@ -17,3 +17,7 @@ dist/
 
 # Docs build
 site/
+
+# Dev-only, not for GitHub: media capture guide + the generation scripts / sources
+/SHOTLIST.md
+/data-raw/
