@@ -622,6 +622,9 @@ def _make_classes():
         # set by the legend colorpicker so w.colors reflects an in-plot recolour
         _legend_colors = traitlets.List(trait=traitlets.Unicode()).tag(sync=True)
         _legend_names = traitlets.List(trait=traitlets.Unicode()).tag(sync=True)
+        # debug: the front-end morph handler writes its furthest stage here so it can
+        # be read from Python (w._morph_diag) without the browser console.
+        _morph_diag = traitlets.Unicode("").tag(sync=True)
 
         @traitlets.observe("_sel_gen")
         def _ack_gen(self, change):
