@@ -1309,6 +1309,26 @@ def scatterplot(
         if point_labels is not None:
             point_labels = [point_labels[int(i)] for i in draw_order]
 
+    # Match scanpy: keep the obs CATEGORY ORDER (not alphabetical) so the colour
+    # assignment lines up, and reuse adata.uns['<col>_colors'] when scanpy already
+    # picked colours — so e.g. 'CD4 T cells' is the first colour, not 'B cells'.
+    if _color_categories is None and isinstance(color_by, str):
+        _obs = None
+        if _is_anndata(data) or _is_mudata(data) or _is_spatialdata(data):
+            _obs = getattr(data, "obs", None)
+        elif isinstance(data, pd.DataFrame):
+            _obs = data
+        if _obs is not None and color_by in getattr(_obs, "columns", []) \
+                and isinstance(getattr(_obs[color_by], "dtype", None), pd.CategoricalDtype):
+            _color_categories = [str(c) for c in _obs[color_by].cat.categories]
+            _uns = getattr(data, "uns", None)
+            _ukey = "%s_colors" % color_by
+            if (_uns is not None and _ukey in _uns
+                    and not custom_colors and custom_palette is None):
+                _uc = [str(c) for c in list(_uns[_ukey])]
+                if len(_uc) >= len(_color_categories):   # scanpy's exact colours, in order
+                    custom_colors = dict(zip(_color_categories, _uc))
+
     spec = build_payload(
         pd_data,
         point_size=point_size, opacity=opacity, point_color=point_color,
