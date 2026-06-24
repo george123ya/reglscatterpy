@@ -13,6 +13,7 @@ like `CST3`, `MS4A1`, `NKG7`).
 | `assets/umap-continuous.png` | Same UMAP coloured by a gene, **colour bar visible** | `rs.scatterplot(adata, x="X_umap", color_by="CST3", continuous_palette="viridis", vmax="p99")` |
 | `assets/filter-sliders.png` | The `filter_by` panel: a histogram with the dual-handle range brush, some points dimmed | `rs.scatterplot(adata, x="X_umap", color_by="louvain", filter_by=["n_genes"])` then drag a handle in |
 | `assets/linked-grid.png` | Two embeddings side by side, one zoomed (to prove the camera is synced) | `compose([scatterplot(adata, x="X_umap", color_by="louvain"), scatterplot(adata, x="X_pca", color_by="louvain")])` |
+| `assets/morph.gif` *(optional, new)* | A `morph_to` animation — points + axes tween from UMAP to spatial | `w = scatterplot(adata, basis="umap", color="cell_type", interactive=True)`; then run `w.morph_to("spatial")` and record |
 
 Capture the canvas region only (not the whole browser chrome). ~1400 px wide is
 plenty; PNG, not JPG, so the points stay crisp.

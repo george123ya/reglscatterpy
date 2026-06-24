@@ -2,7 +2,10 @@
 
 [![PyPI](https://img.shields.io/pypi/v/reglscatterpy.svg)](https://pypi.org/project/reglscatterpy/)
 [![Python versions](https://img.shields.io/pypi/pyversions/reglscatterpy.svg)](https://pypi.org/project/reglscatterpy/)
+[![Docs](https://img.shields.io/badge/docs-github.io-blue.svg)](https://george123ya.github.io/reglscatterpy/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+📖 **[Full documentation & API reference →](https://george123ya.github.io/reglscatterpy/)**
 
 Interactive WebGL scatterplots for single-cell / spatial data in Python —
 **AnnData, MuData, SpatialData**, pandas, numpy. Renders millions of points in
@@ -313,6 +316,32 @@ original cell** — even across panels coloured by different variables, and even
 when the panels are `progressive=True` (each panel fetches detail for the synced
 viewport). A view reset on one panel resets the whole group.
 
+A **list of embeddings** works the same way — one panel per basis, linked:
+
+```python
+rs.scatterplot(adata, basis=["umap", "tsne", "pca"], color="leiden")
+```
+
+> `basis` and `color` can **both** be lists — you get the basis × colour grid
+> (capped at 16 panels).
+
+## Animate between embeddings
+
+On a live widget, `morph_to` tweens the points — and the axes — from the current
+embedding to another `obsm` basis, so you can *see* how cells move between, say,
+a UMAP and their spatial coordinates:
+
+```python
+w = rs.scatterplot(adata, basis="umap", color="cell_type", interactive=True)
+w                                  # shows the UMAP
+w.morph_to("spatial")              # animate UMAP -> spatial layout
+w.morph_to("umap", duration=800)   # and back (ms)
+```
+
+The active **filter, legend selection, colours and lasso selection are kept
+through the transition** and stay recoverable if you undo them. (Atlas-scale
+`progressive=True` plots don't morph — the point set isn't fully resident.)
+
 ## Toolbar & selection extras
 
 `scatterplot(..., toolbar="left")` (or `"top"`, `"none"`) shows an in-plot
@@ -323,6 +352,12 @@ Encode a numeric column **or a gene** on point **size** or **opacity** (in
 addition to colour):
 `scatterplot(adata, basis="umap", color_by="leiden", size_by="n_genes")`,
 `size_by="CST3"`, or `opacity_by="total_counts"`.
+
+The categorical legend shows a **per-category cell count** that updates to the
+*filtered* count while a range/legend filter is active (live for small data, on
+slider-release for big data) — turn it off with `legend_counts=False`. Set a
+global point transparency with `alpha=` (an alias for `opacity`, e.g.
+`alpha=0.5`).
 
 ## Supported objects
 

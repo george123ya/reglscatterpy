@@ -40,12 +40,20 @@ spatial = ["spatialdata"]
 report = ["nbconvert>=7", "nbformat", "ipykernel"]
 all = ["jupyter-scatter>=0.18", "anndata", "mudata", "spatialdata"]
 dev = ["pytest", "anndata", "scipy", "anywidget>=0.9", "nbconvert>=7", "ipykernel"]
+# Build the documentation site (mkdocs build / mkdocs serve).
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+    "mkdocs-include-markdown-plugin>=6.0",
+    "black",  # mkdocstrings uses it to pretty-format long signatures
+]
 
 [project.scripts]
 reglscatterpy-report = "reglscatterpy.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/george123ya/reglscatterpy"
+Documentation = "https://george123ya.github.io/reglscatterpy/"
 "Bug Tracker" = "https://github.com/george123ya/reglscatterpy/issues"
 "R package" = "https://github.com/george123ya/reglScatterplotR"
 
