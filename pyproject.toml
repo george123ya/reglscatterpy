@@ -51,7 +51,7 @@ Homepage = "https://github.com/george123ya/reglscatterpy"
 
 [tool.hatch.build.targets.sdist]
 # data-raw holds dev-only sources + (untracked) huge .h5ad test dumps; never ship them.
-exclude = ["/data-raw", "*.h5ad"]
+exclude = ["/data-raw", "*.h5ad", "**/.ipynb_checkpoints"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/reglscatterpy"]
