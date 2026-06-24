@@ -26,15 +26,11 @@ import pathlib
 
 __all__ = ["ReglScatter", "StaticPlot", "is_live_widget"]
 
-_STATIC_PATH = pathlib.Path(__file__).parent / "static" / "widget.js"
-# Pass the ESM as a CONTENT STRING (not a Path): the front-end module cache then
-# keys on the content, so a new build/version loads fresh instead of being shadowed
-# by a stale cached bundle (notably in the VS Code webview, which otherwise serves
-# the old JS even after a reinstall + kernel restart).
-try:
-    _STATIC = _STATIC_PATH.read_text(encoding="utf-8")
-except Exception:               # fall back to the Path (e.g. file not yet built)
-    _STATIC = _STATIC_PATH
+# Keep _esm as a Path (NOT a content string): anywidget only enables live-reload
+# (ANYWIDGET_HMR=1) when _esm is a FILE, and HMR is the reliable way to iterate on
+# the bundle in VS Code without the webview serving a stale cached copy. (HMR also
+# requires an EDITABLE install — anywidget skips watching files under site-packages.)
+_STATIC = pathlib.Path(__file__).parent / "static" / "widget.js"
 
 
 class _SelectionResult(list):
