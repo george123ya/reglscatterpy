@@ -744,6 +744,7 @@ def scatterplot(
     zoom_on_selection: bool = False,
     legend_position: str = "top-right",
     draggable_legend: bool = True,
+    legend_counts: bool = True,     # show the per-category cell count in the legend
     enable_download: bool = False,
     font_size: int = 12,
     legend_font_size: int = 12,
@@ -1041,7 +1042,7 @@ def scatterplot(
                 _fc = (pd.Series(_ccat).value_counts()
                        .reindex(_ccat.categories).fillna(0).astype("int64"))
                 _lg = {**_lg, "names": _clevels, "colors": _cols,
-                       "counts": [int(c) for c in _fc.to_numpy()]}
+                       "counts": ([int(c) for c in _fc.to_numpy()] if legend_counts else None)}
                 w._spec = {**w._spec, "legend": _lg}
             w._vp = {"data": data, "base": base, "bk": bk, "budget": budget,
                      "x": _fx, "y": _fy,
@@ -1196,6 +1197,7 @@ def scatterplot(
                 legend_opacity=legend_opacity, legend_blur=legend_blur,
                 toolbar=toolbar, zoom_on_selection=zoom_on_selection,
                 legend_position=legend_position, draggable_legend=draggable_legend,
+                legend_counts=legend_counts,
                 enable_download=enable_download, font_size=font_size,
                 legend_font_size=legend_font_size, auto_fit=auto_fit,
                 range_padding=range_padding, xrange=xrange, yrange=yrange,
@@ -1341,6 +1343,7 @@ def scatterplot(
         custom_palette=custom_palette, custom_colors=custom_colors,
         vmin=vmin, vmax=vmax, center_zero=center_zero,
         na_color=na_color, groups=groups, categories=_color_categories,
+        legend_counts=legend_counts,
         xrange=xrange, yrange=yrange, range_padding=range_padding,
         xlab=xlab, ylab=ylab, title=title, legend_title=legend_title,
         show_axes=show_axes, show_tooltip=show_tooltip,

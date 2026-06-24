@@ -161,6 +161,20 @@ def test_compose_grids_have_unique_ids(adata):
     assert ids1.isdisjoint(ids2)                      # separate grids never collide
 
 
+def test_morph_to_sends_message(adata):
+    w = rs.scatterplot(adata, basis="umap", color_by="celltype", interactive=True, show=False)
+    cap = {}
+    w.send = lambda content, buffers=None: cap.update(c=content, b=buffers)
+    w.morph_to("tsne", duration=800)
+    assert cap["c"]["type"] == "morph" and cap["c"]["duration"] == 800
+    assert cap["c"]["xlab"] == "tsne 1" and cap["c"]["n"] == adata.n_obs
+    assert len(cap["b"]) == 2                          # x + y buffers
+    # static plot has no kernel link
+    s = rs.scatterplot(adata, basis="umap", interactive=False, show=False)
+    with pytest.raises(AttributeError):
+        s.morph_to("tsne")
+
+
 def test_add_outline_two_band(adata):
     w = rs.scatterplot(adata, basis="umap", color_by="celltype", add_outline=True,
                        outline_color=("black", "white"), outline_width=(0.3, 0.05), show=False)

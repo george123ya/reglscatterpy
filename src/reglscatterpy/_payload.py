@@ -356,6 +356,7 @@ def build_payload(
     na_color="lightgray",
     groups=None,
     categories=None,
+    legend_counts=True,
     xrange=None,
     yrange=None,
     range_padding=0.15,
@@ -434,6 +435,8 @@ def build_payload(
     options["size"] = point_size
     options["opacity"] = opacity
     legend = color_payload["legend"]
+    if not legend_counts and legend.get("counts") is not None:
+        legend["counts"] = None          # hide per-category cell counts
     z = color_payload["z"]
 
     # encode z by its variable type, mirroring R's switch()

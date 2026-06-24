@@ -315,6 +315,45 @@ def _make_classes():
                 return None
             return dict(zip(lg.get("names", []), lg.get("colors", [])))
 
+        def morph_to(self, basis, duration=1200):
+            """Animate the points from their current layout to another embedding —
+            e.g. ``w.morph_to('spatial')`` morphs a UMAP into the spatial layout
+            (and back with ``w.morph_to('umap')``). Positions tween; colours and
+            sizes stay. Live (``interactive=True``) only; not for ``progressive=True``
+            (only a subset is resident). Returns ``self`` so calls can chain."""
+            if not callable(getattr(self, "send", None)):
+                raise AttributeError("morph_to() needs a live widget (interactive=True).")
+            if getattr(self, "_vp", None) is not None:
+                raise NotImplementedError(
+                    "morph_to() isn't supported with progressive=True yet (only a "
+                    "subset of cells is resident). Use a non-progressive plot "
+                    "(e.g. max_points=) to morph between embeddings."
+                )
+            import numpy as np
+            from ._extract import _resolve_basis
+            from ._payload import _pad_range, _normalise_range, _q_u16
+            src = getattr(self, "_source", None)
+            if src is None or not hasattr(src, "obsm"):
+                raise TypeError("morph_to() needs an AnnData-like source with .obsm embeddings.")
+            key = _resolve_basis(src, basis)
+            coords = np.asarray(src.obsm[key], dtype="float64")[:, :2]
+            do = getattr(self, "_draw_order", None)
+            if do is not None:                       # move the SAME drawn cells
+                coords = coords[np.asarray(do)]
+            x, y = coords[:, 0], coords[:, 1]
+            xr = _pad_range(float(np.nanmin(x)), float(np.nanmax(x)), 0.05)
+            yr = _pad_range(float(np.nanmin(y)), float(np.nanmax(y)), 0.05)
+            xb = _q_u16(_normalise_range(x, xr[0], xr[1]))
+            yb = _q_u16(_normalise_range(y, yr[0], yr[1]))
+            lbl = key[2:] if key[:2].lower() == "x_" else key
+            self.send(
+                {"type": "morph", "duration": int(duration), "n": int(x.size),
+                 "x_min": xr[0], "x_max": xr[1], "y_min": yr[0], "y_max": yr[1],
+                 "xlab": "%s 1" % lbl, "ylab": "%s 2" % lbl},
+                buffers=[xb.tobytes(), yb.tobytes()],
+            )
+            return self
+
         def highlight(self, indices, color=None):
             """Persistently mark points with a crisp ring + size bump (the engine's
             selection look) — but this is **not** the selection, so it survives a
