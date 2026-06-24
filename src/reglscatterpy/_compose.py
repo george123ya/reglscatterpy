@@ -72,6 +72,8 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync="auto"):
         w = ReglScatter()
         w._height = int(getattr(p, "_height", 500) or 500)
         w._width = int(getattr(p, "_width", 0) or 0)
+        from ._config import resolve_theme
+        w._theme = getattr(p, "_theme", None) or resolve_theme(None)
         w._source = getattr(p, "_source", None)
         w._draw_order = getattr(p, "_draw_order", None)
         w._spec = spec

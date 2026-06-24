@@ -33,6 +33,7 @@ from ._extract import (
     _resolve_anndata_vec,
     extract,
 )
+from ._config import resolve_theme as _resolve_theme
 from ._palettes import CONTINUOUS, QUALITATIVE
 from ._payload import build_payload, _hexify
 
@@ -759,6 +760,7 @@ def scatterplot(
     height: int = 500,
     backend: str = "regl",
     interactive: bool = True,
+    theme: Optional[str] = None,    # live-widget card theme: "light" (default) / "dark" / "auto"; None = global set_theme()
     progressive: bool = False,      # density-sketch overview + full detail as you zoom in (for >~4M points)
     progressive_opts: Optional[dict] = None,  # tuning: {"detail_max_points": int, "overscan": float}
     _fast: bool = False,            # internal: binary channel transfer (auto for live regl widgets)
@@ -843,6 +845,13 @@ def scatterplot(
         reading interactions back into Python. Set ``interactive=False`` for a
         self-contained static snapshot (an iframe that renders anywhere, e.g. a
         server without the Jupyter widgets frontend, but with no kernel link).
+    theme
+        Card theme for the **live** widget: ``"light"`` (default — a white figure
+        card, matching the static export), ``"dark"``, or ``"auto"``/``"system"``
+        (follow the notebook: dark card only when the host theme is dark). ``None``
+        uses the global default from :func:`reglscatterpy.set_theme`. An explicit
+        ``background_color`` / ``axis_color`` always overrides the theme. Has no
+        effect on a static/exported plot (it stays portably light).
     progressive
         For datasets beyond ~4M: show a density-sketch overview and re-render all
         cells inside the viewport as you zoom in (detail-on-zoom, no
@@ -1425,6 +1434,7 @@ def scatterplot(
         widget = ReglScatter()
         widget._height = int(height)
         widget._width = w
+        widget._theme = _resolve_theme(theme)   # light (default) / dark / auto
         widget._source = data   # so w.annotate(...) can write back to obs/colData
         widget._draw_order = draw_order   # selection translates through this
         widget._spec = spec

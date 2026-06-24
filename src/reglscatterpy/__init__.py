@@ -15,6 +15,7 @@ million-point plot in one call::
 
 from . import _export
 from ._compose import compose
+from ._config import get_theme, set_theme
 from ._export import record_html, save_html, save_notebook_html
 from ._extract import PlotData, extract
 from .scatterplot import scatterplot
@@ -27,6 +28,8 @@ __all__ = [
     "record_html",
     "extract",
     "PlotData",
+    "set_theme",
+    "get_theme",
     "__version__",
 ]
-__version__ = "0.6.29"
+__version__ = "0.6.30"

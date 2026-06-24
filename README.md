@@ -140,6 +140,36 @@ adata[w.selection]         # …read them back in Python
 > blank on reopen). The static default does not — so use the default for figures
 > you want to keep/share, and `interactive=True` while you're actively selecting.
 
+## Theme (light / dark / auto)
+
+Plots are a **white "figure card" by default** — portable, and matching the
+static/exported HTML. To make the live widget follow your notebook instead, pass
+`theme=`:
+
+```python
+rs.scatterplot(adata, basis="umap", color="leiden", theme="auto")   # dark card in a dark theme
+rs.scatterplot(adata, basis="umap", color="leiden", theme="dark")   # always dark
+```
+
+- `"light"` (default) — white card.
+- `"dark"` — dark card with light axes/legend.
+- `"auto"` (alias `"system"`) — dark card **only** when the host (VS Code /
+  JupyterLab) is in a dark theme, otherwise white.
+
+Set it once for the whole session instead of per call:
+
+```python
+rs.set_theme("auto")        # every subsequent plot follows the notebook theme
+rs.get_theme()              # -> "auto"
+```
+
+A per-call `theme=` overrides the global, and an explicit `background_color=` /
+`axis_color=` always wins over either. The theme only affects the **live**
+widget; an exported `.html` stays portably light (it can't know the future
+viewer's theme). In VS Code the widget also clears the editor's hard-coded white
+ipywidget background **around its own cell only**, so the card sits cleanly on
+the theme background without disturbing other widgets.
+
 ## Save a standalone HTML (offline, kernel-free)
 
 The Python equivalent of R's `htmlwidgets::saveWidget`: write a single

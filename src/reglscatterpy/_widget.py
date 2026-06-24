@@ -638,6 +638,10 @@ def _make_classes():
         _spec = traitlets.Dict().tag(sync=True)
         _height = traitlets.Int(500).tag(sync=True)
         _width = traitlets.Int(0).tag(sync=True)
+        # Theme mode for the LIVE widget: "light" (default white card), "dark",
+        # or "auto" (match a dark host). Rides its own trait, NOT _spec, so the
+        # R-parity payload stays byte-identical.
+        _theme = traitlets.Unicode("light").tag(sync=True)
         _selection = traitlets.List(trait=traitlets.Int()).tag(sync=True)
         _filtered = traitlets.List(trait=traitlets.Int()).tag(sync=True)
         _filtered_on = traitlets.Bool(False).tag(sync=True)

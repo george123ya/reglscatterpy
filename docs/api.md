@@ -24,6 +24,14 @@ The public functions exported from `reglscatterpy`.
 
 ---
 
+::: reglscatterpy.set_theme
+
+---
+
+::: reglscatterpy.get_theme
+
+---
+
 ::: reglscatterpy.extract
 
 ---
