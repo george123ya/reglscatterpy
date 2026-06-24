@@ -34,7 +34,7 @@ from ._extract import (
     extract,
 )
 from ._palettes import CONTINUOUS, QUALITATIVE
-from ._payload import build_payload
+from ._payload import build_payload, _hexify
 
 __all__ = ["scatterplot"]
 
@@ -721,7 +721,7 @@ def scatterplot(
     opacity_by: Any = None,
     tooltip_by: Any = None,
     pixel_ratio: Optional[float] = None,
-    categorical_palette: str = "Set1",
+    categorical_palette: str = "scanpy",   # scanpy's size-aware default (vega_20/zeileis_28/godsnot_102)
     continuous_palette: str = "viridis",
     custom_palette: Optional[Sequence[str]] = None,
     custom_colors: Optional[dict] = None,
@@ -808,7 +808,10 @@ def scatterplot(
         Device-pixel-ratio for the WebGL backing store (defaults to a crisp
         ``max(devicePixelRatio, 2)`` in-widget).
     categorical_palette
-        A ColorBrewer qualitative palette name (``"Set1"``, ``"Dark2"`` ...).
+        ``"scanpy"`` (the default) picks scanpy's size-aware colours
+        (vega_20 / zeileis_28 / godsnot_102), matching ``sc.pl.umap``. Or a
+        ColorBrewer qualitative name (``"Set1"``, ``"Dark2"`` ...). Read the
+        rendered map back with ``w.colors`` (``{category: hex}``).
     continuous_palette
         A viridis-family name (``"viridis"``, ``"magma"`` ...).
     custom_colors, custom_palette
@@ -1034,7 +1037,7 @@ def scatterplot(
                 _keep = None if groups is None else {str(g) for g in groups}
                 for _i, _lv in enumerate(_clevels):
                     if _lv == "NA" or (_keep is not None and _lv not in _keep):
-                        _cols[_i] = na_color
+                        _cols[_i] = _hexify(na_color)
                 _fc = (pd.Series(_ccat).value_counts()
                        .reindex(_ccat.categories).fillna(0).astype("int64"))
                 _lg = {**_lg, "names": _clevels, "colors": _cols,
@@ -1258,9 +1261,10 @@ def scatterplot(
             show=show, **backend_kwargs,
         )
     # palette names are validated on the regl path (jscatter uses its own)
-    if categorical_palette not in QUALITATIVE:
+    if categorical_palette != "scanpy" and categorical_palette not in QUALITATIVE:
         raise _not_found("categorical_palette", categorical_palette,
-                         list(QUALITATIVE), searched="built-in qualitative palettes")
+                         ["scanpy"] + list(QUALITATIVE),
+                         searched="built-in qualitative palettes")
     if continuous_palette not in CONTINUOUS:
         raise _not_found("continuous_palette", continuous_palette,
                          list(CONTINUOUS), searched="built-in continuous palettes")
@@ -1358,14 +1362,20 @@ def scatterplot(
                 stacklevel=2,
             )
         else:
-            ow = outline_width or (0.3, 0.05)
-            oc = outline_color or ("black", "white")
+            # outline_width / outline_color may be a scalar (single ring) OR a
+            # 2-tuple (outline, gap) — like scanpy. Both bands are drawn by the
+            # spOutline shader: the outer `width` fraction of the radius is the
+            # outline colour, the next `gap` fraction is the gap (background) colour.
+            ow = outline_width if isinstance(outline_width, (list, tuple)) else (outline_width or 0.3, 0.0)
+            oc = outline_color if isinstance(outline_color, (list, tuple)) else (outline_color or "black", background_color or "#ffffff")
             spec["addOutline"] = True
             spec["performanceMode"] = False   # need round points for a round ring
-            spec["outlineAllWidth"] = max(1.0, float(ow[0]) * float(point_size or 4))
-            _rgb = _rgb01(oc[0])
-            spec["outlineColor"] = "#%02x%02x%02x" % tuple(
-                int(round(max(0.0, min(1.0, c)) * 255)) for c in _rgb)
+            spec["spOutline"] = {
+                "width": float(ow[0]),
+                "gap": float(ow[1]) if len(ow) > 1 else 0.0,
+                "color": _rgb01(oc[0]),
+                "gapColor": _rgb01(oc[1] if len(oc) > 1 else (background_color or "#ffffff")),
+            }
 
     # Be honest about subsampling: caption the plot ("X of Y shown") and, when the
     # downsample was automatic (not user-requested), warn — so a subsampled plot is

@@ -120,6 +120,35 @@ def _to_hex7(col: str) -> str:
     return col[:7]
 
 
+_CSS_HEX = {
+    "lightgray": "#d3d3d3", "lightgrey": "#d3d3d3", "gray": "#808080",
+    "grey": "#808080", "darkgray": "#a9a9a9", "darkgrey": "#a9a9a9",
+    "white": "#ffffff", "black": "#000000", "red": "#ff0000",
+    "green": "#008000", "blue": "#0000ff", "none": "#d3d3d3",
+}
+
+
+def _hexify(c, fallback="#d3d3d3") -> str:
+    """A colour name / hex / rgb -> a 6-digit ``#rrggbb`` the WebGL renderer can
+    parse. CSS names like ``"lightgray"`` were previously passed through raw, so
+    the renderer drew them as the (invisible) background — e.g. un-annotated cells."""
+    if c is None:
+        return fallback
+    s = str(c).strip()
+    if s.startswith("#"):
+        if len(s) == 4:                      # #abc -> #aabbcc
+            return "#" + "".join(ch * 2 for ch in s[1:])
+        return s[:7]
+    low = s.lower()
+    if low in _CSS_HEX:
+        return _CSS_HEX[low]
+    try:
+        import matplotlib.colors as mc
+        return mc.to_hex(s)
+    except Exception:
+        return fallback
+
+
 def _resolve_categorical_palette(
     levels: Sequence[str],
     custom_colors: Optional[dict] = None,
@@ -139,12 +168,12 @@ def _resolve_categorical_palette(
             cols = [cp[i] if i < len(cp) else None for i in range(n)]
 
     if any(c is None for c in cols):
-        base = QUALITATIVE.get(categorical_palette, QUALITATIVE["Set1"])
-        max_n = len(base)
-        if n > max_n:
-            fallback = _color_ramp(base, n)          # interpolate when too many levels
+        if categorical_palette == "scanpy":          # size-aware scanpy default
+            from ._palettes import scanpy_palette
+            fallback = scanpy_palette(n)
         else:
-            fallback = base[:n]
+            base = QUALITATIVE.get(categorical_palette, QUALITATIVE["Set1"])
+            fallback = _color_ramp(base, n) if n > len(base) else base[:n]
         cols = [c if c is not None else fallback[i] for i, c in enumerate(cols)]
 
     return [_to_hex7(c if c is not None else "#808080") for c in cols]
@@ -251,7 +280,7 @@ def _build_color_payload(
         for i, lv in enumerate(levels):
             slv = str(lv)
             if slv == "NA" or (keep is not None and slv not in keep):
-                hex_cols[i] = na_color
+                hex_cols[i] = _hexify(na_color)
         z = cat.codes.astype("int64")  # 0-based, matches as.integer(f)-1
         counts = pd.Series(cat).value_counts().reindex(levels).fillna(0).astype("int64")
         options = {"colorBy": "valueA", "pointColor": hex_cols}

@@ -304,6 +304,17 @@ def _make_classes():
             else:
                 self._selection = positions
 
+        @property
+        def colors(self):
+            """The categorical colour map as ``{category: '#rrggbb'}`` (the rendered
+            palette). ``None`` for a continuous / single-colour plot. Save it
+            scanpy-style with e.g.
+            ``adata.uns['louvain_colors'] = list(w.colors.values())``."""
+            lg = (getattr(self, "_spec", None) or {}).get("legend") or {}
+            if lg.get("var_type") != "categorical":
+                return None
+            return dict(zip(lg.get("names", []), lg.get("colors", [])))
+
         def highlight(self, indices, color=None):
             """Persistently mark points with a crisp ring + size bump (the engine's
             selection look) — but this is **not** the selection, so it survives a
@@ -397,7 +408,7 @@ def _make_classes():
             return out
 
         def diff_expression(self, group_a=None, group_b=None, n=10, layer=None,
-                            method="wilcoxon", key_added=None):
+                            method="wilcoxon", key_added=None, use_raw=False):
             """Top differential genes between two cell groups.
 
             ``group_a`` defaults to the lasso selection; ``group_b`` to the rest.
@@ -450,6 +461,10 @@ def _make_classes():
                     sc.tl.rank_genes_groups(
                         ad, "_rs_grp", groups=["A"], reference=ref,
                         method=method, layer=layer, n_genes=n, key_added=_key,
+                        # default to .X (the matrix the plot colours by); scanpy
+                        # otherwise uses adata.raw when present, a different gene
+                        # space that often introduces NaNs / unexpected genes.
+                        use_raw=use_raw,
                     )
                     df = sc.get.rank_genes_groups_df(ad, group="A", key=_key).head(n).reset_index(drop=True)
                     # store the scanpy-NATIVE uns structure on the real adata, so

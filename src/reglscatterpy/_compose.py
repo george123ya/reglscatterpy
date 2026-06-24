@@ -121,7 +121,12 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync="auto"):
                     stacklevel=2,
                 )
 
-    ids = [f"sp_compose_{i}" for i in range(len(plots))]
+    # UNIQUE ids per compose() call — the front-end keys its global sync registry by
+    # plotId, so reusing "sp_compose_0/1/.." across cells would cross-link separate
+    # grids (a panel here syncing with a same-indexed panel from another cell).
+    import uuid
+    _tag = uuid.uuid4().hex[:8]
+    ids = [f"sp_compose_{_tag}_{i}" for i in range(len(plots))]
     group = ids if do_sync else None
     for w, pid in zip(plots, ids):
         spec = dict(getattr(w, "_spec", {}) or {})

@@ -129,6 +129,46 @@ def test_alpha_is_global_opacity(adata):
         rs.scatterplot(adata, basis="umap", alpha=[0.3, 0.5], show=False)
 
 
+def test_scanpy_default_palette_and_colors(adata):
+    w = rs.scatterplot(adata, basis="umap", color_by="celltype", show=False)
+    cols = w._spec["legend"]["colors"]
+    assert cols[0] == "#1f77b4"                       # scanpy/vega first colour
+    assert all(c.startswith("#") and len(c) == 7 for c in cols)
+    # w.colors -> {category: hex}, save-able as adata.uns['x_colors'] = list(...)
+    assert w.colors == dict(zip(w._spec["legend"]["names"], cols))
+
+
+def test_na_color_is_hex_not_css_name(adata):
+    w = rs.scatterplot(adata, basis="umap", color_by="celltype", na_color="lightgray", show=False)
+    # build a partially-NaN column to exercise the NA path
+    obs = adata.obs.copy()
+    obs["part"] = pd.Categorical(["T"] * 10 + [None] * (adata.n_obs - 10))
+    adata.obs["part"] = obs["part"]
+    w2 = rs.scatterplot(adata, basis="umap", color_by="part", show=False)
+    lg = w2._spec["legend"]
+    assert "NA" in lg["names"]
+    na_hex = lg["colors"][lg["names"].index("NA")]
+    assert na_hex == "#d3d3d3"                        # hex, not the raw 'lightgray'
+
+
+def test_compose_grids_have_unique_ids(adata):
+    g1 = rs.scatterplot(adata, basis="umap", color_by=["celltype", "Gene3"],
+                        interactive=True, show=False)
+    g2 = rs.scatterplot(adata, basis="umap", color_by=["celltype", "Gene4"],
+                        interactive=True, show=False)
+    ids1 = {c._spec["plotId"] for c in g1.children}
+    ids2 = {c._spec["plotId"] for c in g2.children}
+    assert ids1.isdisjoint(ids2)                      # separate grids never collide
+
+
+def test_add_outline_two_band(adata):
+    w = rs.scatterplot(adata, basis="umap", color_by="celltype", add_outline=True,
+                       outline_color=("black", "white"), outline_width=(0.3, 0.05), show=False)
+    o = w._spec["spOutline"]
+    assert o["width"] == 0.3 and o["gap"] == 0.05
+    assert o["color"] == [0.0, 0.0, 0.0] and o["gapColor"] == [1.0, 1.0, 1.0]
+
+
 # --- Change 3: gene-aware size_by / opacity_by ----------------------------- #
 def test_size_by_gene_resolves(adata):
     w = rs.scatterplot(adata, basis="umap", size_by="Gene3", show=False)
