@@ -1321,6 +1321,8 @@ def scatterplot(
         if _obs is not None and color_by in getattr(_obs, "columns", []) \
                 and isinstance(getattr(_obs[color_by], "dtype", None), pd.CategoricalDtype):
             _color_categories = [str(c) for c in _obs[color_by].cat.categories]
+            if _obs[color_by].isna().any():      # keep the NA level (build_payload maps NaN -> "NA")
+                _color_categories = _color_categories + ["NA"]
             _uns = getattr(data, "uns", None)
             _ukey = "%s_colors" % color_by
             if (_uns is not None and _ukey in _uns
