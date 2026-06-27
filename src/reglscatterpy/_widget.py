@@ -52,6 +52,9 @@ class _SelectionResult(list):
     def diff_expression(self, group_b=None, **kw):
         return self._w.diff_expression(group_a=list(self), group_b=group_b, **kw)
 
+    def diff_expression_by(self, by, **kw):
+        return self._w.diff_expression_by(by, selection=list(self), **kw)
+
     def annotate(self, key, label):
         return self._w.annotate(key, label, selection=list(self))
 
@@ -461,6 +464,81 @@ def _make_classes():
                 out["fraction"] = counts / counts.sum()
             return out
 
+        def _pick_expr_matrix(self, ad, layer, use_raw):
+            """Choose ``(layer, use_raw)`` for ``sc.tl.rank_genes_groups`` so the
+            logfoldchanges come out FINITE.
+
+            logfoldchanges need NON-NEGATIVE (log-normalised) values; running on a
+            SCALED / z-scored ``.X`` (which has negatives) makes scanpy emit NaN
+            logFC. When the caller didn't pin a matrix and ``.X`` looks scaled,
+            route to log-norm expression for the SAME genes (``adata.raw``
+            restricted to ``var_names``) so logFC is finite without dragging in
+            non-HVG genes; fall back to a log-norm layer, else warn. Shared by
+            :meth:`diff_expression` and :meth:`diff_expression_by`.
+            """
+            import warnings
+
+            import numpy as np
+
+            _layer, _ur = layer, use_raw
+            if _ur is None and _layer is None:
+                def _neg(x):
+                    try:
+                        import scipy.sparse as _sp
+                        if _sp.issparse(x):
+                            return x.data.size > 0 and float(x.data.min()) < -1e-6
+                    except Exception:
+                        pass
+                    a = np.asarray(x)
+                    return a.size > 0 and float(np.nanmin(a)) < -1e-6
+
+                if not _neg(ad.X):
+                    _ur = False                                  # .X already log-norm
+                elif ad.raw is not None and set(ad.var_names).issubset(set(ad.raw.var_names)):
+                    ad.layers["_rs_lognorm"] = ad.raw[:, list(ad.var_names)].X
+                    _layer, _ur = "_rs_lognorm", False           # finite logFC, same genes
+                else:
+                    _cand = next((ln for ln in ("lognorm", "log1p", "logcounts", "data")
+                                  if ln in ad.layers and not _neg(ad.layers[ln])), None)
+                    if _cand is not None:
+                        _layer, _ur = _cand, False
+                    else:
+                        _ur = False
+                        warnings.warn(
+                            "diff_expression: adata.X looks scaled (z-scored), so scanpy's "
+                            "logfoldchanges will be NaN (the scores / p-values are still "
+                            "valid). For finite logFC, set `adata.raw = adata` on the "
+                            "log-normalised data before scaling, or pass a log-norm `layer=`.",
+                            stacklevel=2,
+                        )
+            return _layer, _ur
+
+        def _ttest_de(self, X, a_mask, b_mask, var_names, n):
+            """No-scanpy fallback: Welch t-test of group A vs B over ``X`` rows.
+            Returns the top-``n`` genes by |stat| as a tidy DataFrame."""
+            import numpy as np
+            import pandas as pd
+
+            Xa, Xb = X[a_mask], X[b_mask]
+            if hasattr(Xa, "toarray"):
+                Xa, Xb = Xa.toarray(), Xb.toarray()
+            Xa, Xb = np.asarray(Xa, dtype="float64"), np.asarray(Xb, dtype="float64")
+            ma, mb = Xa.mean(0), Xb.mean(0)
+            lfc = np.log2((ma + 1e-9) / (mb + 1e-9))
+            try:
+                from scipy import stats
+                stat, pval = stats.ttest_ind(Xa, Xb, axis=0, equal_var=False)
+            except Exception:  # pragma: no cover - scipy optional
+                denom = Xa.std(0) + Xb.std(0) + 1e-9
+                stat, pval = (ma - mb) / denom, np.full(ma.shape, np.nan)
+            res = pd.DataFrame({
+                "gene": np.asarray(var_names),
+                "logFC": lfc, "stat": stat, "pval": pval,
+                "mean_A": ma, "mean_B": mb,
+            })
+            res = res.reindex(res["stat"].abs().sort_values(ascending=False).index)
+            return res.head(n).reset_index(drop=True)
+
         def diff_expression(self, group_a=None, group_b=None, n=10, layer=None,
                             method="wilcoxon", key_added=None, use_raw=None):
             """Top differential genes between two cell groups.
@@ -508,50 +586,13 @@ def _make_classes():
             if type(src).__name__ == "AnnData":
                 try:
                     import scanpy as sc
-                    import warnings
 
                     ad = src.copy()
                     ad.obs["_rs_grp"] = pd.Categorical(labels)
                     _key = _save_to or "rank_genes_groups"
 
-                    # Pick the expression matrix. logfoldchanges need NON-NEGATIVE
-                    # (log-normalised) values; running on a SCALED / z-scored .X
-                    # (which has negatives) makes scanpy emit NaN logFC. When the
-                    # caller didn't pin a source and .X looks scaled, route to
-                    # log-norm expression for the SAME genes (adata.raw restricted
-                    # to var_names) so logFC is finite without dragging in non-HVG
-                    # genes; fall back to a log-norm layer, else warn.
-                    _layer, _ur = layer, use_raw
-                    if _ur is None and _layer is None:
-                        def _neg(x):
-                            try:
-                                import scipy.sparse as _sp
-                                if _sp.issparse(x):
-                                    return x.data.size > 0 and float(x.data.min()) < -1e-6
-                            except Exception:
-                                pass
-                            a = np.asarray(x)
-                            return a.size > 0 and float(np.nanmin(a)) < -1e-6
-
-                        if not _neg(ad.X):
-                            _ur = False                                  # .X already log-norm
-                        elif ad.raw is not None and set(ad.var_names).issubset(set(ad.raw.var_names)):
-                            ad.layers["_rs_lognorm"] = ad.raw[:, list(ad.var_names)].X
-                            _layer, _ur = "_rs_lognorm", False           # finite logFC, same genes
-                        else:
-                            _cand = next((ln for ln in ("lognorm", "log1p", "logcounts", "data")
-                                          if ln in ad.layers and not _neg(ad.layers[ln])), None)
-                            if _cand is not None:
-                                _layer, _ur = _cand, False
-                            else:
-                                _ur = False
-                                warnings.warn(
-                                    "diff_expression: adata.X looks scaled (z-scored), so scanpy's "
-                                    "logfoldchanges will be NaN (the scores / p-values are still "
-                                    "valid). For finite logFC, set `adata.raw = adata` on the "
-                                    "log-normalised data before scaling, or pass a log-norm `layer=`.",
-                                    stacklevel=2,
-                                )
+                    # Pick the expression matrix so logFC is finite (see helper).
+                    _layer, _ur = self._pick_expr_matrix(ad, layer, use_raw)
 
                     sc.tl.rank_genes_groups(
                         ad, "_rs_grp", groups=["A"], reference=ref,
@@ -568,25 +609,173 @@ def _make_classes():
             a_mask = labels == "A"
             b_mask = labels == ref
             X = src.layers[layer] if layer else src.X
-            Xa, Xb = X[a_mask], X[b_mask]
-            if hasattr(Xa, "toarray"):
-                Xa, Xb = Xa.toarray(), Xb.toarray()
-            Xa, Xb = np.asarray(Xa, dtype="float64"), np.asarray(Xb, dtype="float64")
-            ma, mb = Xa.mean(0), Xb.mean(0)
-            lfc = np.log2((ma + 1e-9) / (mb + 1e-9))
-            try:
-                from scipy import stats
-                stat, pval = stats.ttest_ind(Xa, Xb, axis=0, equal_var=False)
-            except Exception:  # pragma: no cover - scipy optional
-                denom = Xa.std(0) + Xb.std(0) + 1e-9
-                stat, pval = (ma - mb) / denom, np.full(ma.shape, np.nan)
-            res = pd.DataFrame({
-                "gene": np.asarray(src.var_names),
-                "logFC": lfc, "stat": stat, "pval": pval,
-                "mean_A": ma, "mean_B": mb,
-            })
-            res = res.reindex(res["stat"].abs().sort_values(ascending=False).index)
-            return _save(res.head(n).reset_index(drop=True))
+            return _save(self._ttest_de(X, a_mask, b_mask, src.var_names, n))
+
+        def diff_expression_by(self, by, group_a=None, group_b=None, selection=None,
+                               n=10, layer=None, method="wilcoxon", key_added=None,
+                               use_raw=None, min_cells=2):
+            """Differential expression BETWEEN the levels of an ``obs`` column,
+            restricted to the lasso selection.
+
+            Lasso a group of cells, then split them by ``by`` (an ``obs`` column
+            such as ``"time"`` or ``"condition"``) and compare its levels:
+
+            * ``group_a`` **and** ``group_b`` given -> a single A-vs-B comparison
+              (e.g. ``group_a="D30", group_b="Y1"``); returns one DataFrame.
+            * ``group_a`` only -> that level vs the rest of the selection (pooled);
+              returns one DataFrame.
+            * **neither** -> ALL pairwise comparisons between the levels present in
+              the selection; returns a ``dict`` ``{"D30_vs_Y1": df, ...}``.
+
+            Cells default to the current lasso ``selection`` (pass ``selection=`` to
+            override, e.g. integer positions / obs_names / a boolean mask); if
+            nothing is selected it falls back to **all** cells. Levels with fewer
+            than ``min_cells`` cells in the selection are skipped (with a warning).
+
+            Uses ``sc.tl.rank_genes_groups`` when scanpy is installed (same finite-
+            logFC matrix routing as :meth:`diff_expression`), else a Welch t-test.
+            A single comparison is auto-saved to ``adata.uns`` like
+            :meth:`diff_expression`; the all-pairwise form only saves when you pass
+            ``key_added`` (each pair under ``f"{key_added}_{a}_vs_{b}"``).
+            AnnData/MuData only.
+            """
+            import warnings
+
+            import numpy as np
+            import pandas as pd
+
+            src = getattr(self, "_source", None)
+            if src is None or not hasattr(src, "X"):
+                raise TypeError("diff_expression_by() needs an AnnData/MuData with .X.")
+            frame = src.obs if hasattr(src, "obs") else src
+            if not hasattr(frame, "columns") or by not in frame.columns:
+                cols = list(getattr(frame, "columns", []))
+                raise KeyError(
+                    f"'{by}' is not an obs column. Available e.g.: {cols[:8]}"
+                )
+
+            # Resolve the cell set: explicit selection > lasso > all cells.
+            if selection is not None:
+                sel = self._resolve_orig_indices(selection)
+            else:
+                sel = list(self.selection)
+                if not sel:
+                    sel = list(range(src.n_obs))   # nothing lassoed -> whole dataset
+
+            grp = frame[by].iloc[sel]
+            # Levels actually present (drop NaN); keep categorical order if any.
+            if hasattr(grp, "cat"):
+                present = [lv for lv in grp.cat.categories if (grp == lv).any()]
+            else:
+                present = list(pd.unique(grp.dropna()))
+            counts = {lv: int((grp == lv).sum()) for lv in present}
+            usable = [lv for lv in present if counts[lv] >= min_cells]
+            dropped = [lv for lv in present if counts[lv] < min_cells]
+            if dropped:
+                warnings.warn(
+                    f"diff_expression_by: skipping {len(dropped)} level(s) of '{by}' "
+                    f"with < {min_cells} cells in the selection: "
+                    f"{[f'{lv} (n={counts[lv]})' for lv in dropped]}",
+                    stacklevel=2,
+                )
+
+            def _coerce(val, role):
+                # accept the level as given or stringified (categoricals print as str)
+                for lv in present:
+                    if val == lv or str(val) == str(lv):
+                        return lv
+                raise ValueError(
+                    f"{role}={val!r} is not a level of '{by}' present in the "
+                    f"selection. Present levels: {present}"
+                )
+
+            ga = None if group_a is None else _coerce(group_a, "group_a")
+            gb = None if group_b is None else _coerce(group_b, "group_b")
+
+            # Build the list of (a, b) comparisons to run.
+            if ga is not None and gb is not None:
+                pairs = [(ga, gb)]
+            elif ga is not None:
+                pairs = [(ga, "rest")]                       # level vs pooled rest
+            else:
+                from itertools import combinations
+                if len(usable) < 2:
+                    raise ValueError(
+                        f"need >= 2 levels of '{by}' with >= {min_cells} cells in the "
+                        f"selection for pairwise DE; got {usable or present}."
+                    )
+                pairs = list(combinations(usable, 2))
+
+            # "rest" = all OTHER selected cells (so comparisons stay inside the
+            # lasso); cells outside the selection are never tested.
+            grp_full = frame[by]
+
+            def _one(a, b):
+                # labels: a -> "A", b (or pooled rest) -> "B", everything else excluded
+                labels = np.array(["_excl"] * src.n_obs, dtype=object)
+                for i in sel:
+                    v = grp_full.iloc[i]
+                    if v == a:
+                        labels[i] = "A"
+                    elif b == "rest":
+                        if v in present:        # any other selected, non-NaN cell
+                            labels[i] = "B"
+                    elif v == b:
+                        labels[i] = "B"
+                a_mask = labels == "A"
+                b_mask = labels == "B"
+                if not a_mask.any() or not b_mask.any():
+                    return None
+
+                _key = None
+                if type(src).__name__ == "AnnData":
+                    try:
+                        import scanpy as sc
+
+                        ad = src[a_mask | b_mask].copy()
+                        ad.obs["_rs_by"] = pd.Categorical(labels[a_mask | b_mask])
+                        _layer, _ur = self._pick_expr_matrix(ad, layer, use_raw)
+                        sc.tl.rank_genes_groups(
+                            ad, "_rs_by", groups=["A"], reference="B",
+                            method=method, layer=_layer, n_genes=n,
+                            key_added="rank_genes_groups", use_raw=_ur,
+                        )
+                        df = (sc.get.rank_genes_groups_df(ad, group="A")
+                              .head(n).reset_index(drop=True))
+                        return df, ad.uns.get("rank_genes_groups")
+                    except ImportError:
+                        pass
+                X = src.layers[layer] if layer else src.X
+                return self._ttest_de(X, a_mask, b_mask, src.var_names, n), None
+
+            base_key = (None if key_added is False else key_added)
+
+            # Single comparison -> one DataFrame (auto-saved like diff_expression).
+            if len(pairs) == 1:
+                a, b = pairs[0]
+                out = _one(a, b)
+                if out is None:
+                    raise ValueError(
+                        f"comparison {a} vs {b} has an empty side after filtering."
+                    )
+                df, native = out
+                save_to = (base_key or "rank_genes_groups") if hasattr(src, "uns") else None
+                if save_to is not None:
+                    src.uns[save_to] = native if native is not None else df
+                return df
+
+            # All-pairwise -> dict keyed "A_vs_B"; only save when key_added given.
+            results = {}
+            for a, b in pairs:
+                out = _one(a, b)
+                if out is None:
+                    continue
+                df, native = out
+                key = f"{a}_vs_{b}"
+                results[key] = df
+                if base_key and hasattr(src, "uns") and native is not None:
+                    src.uns[f"{base_key}_{key}"] = native
+            return results
 
         def __repr__(self):
             spec = getattr(self, "_spec", None) or {}

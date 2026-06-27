@@ -57,6 +57,39 @@ When the source is an **AnnData** the result is **auto-saved** to
 scanpy convention), or ``key_added`` if you pass one. Pass
 ``key_added=False`` to skip saving.
 
+### `w.diff_expression_by(by, group_a=None, group_b=None, selection=None, n=10, layer=None, method='wilcoxon', key_added=None, use_raw=None, min_cells=2)`
+
+Differential expression **between the levels of an obs column**, restricted to the
+lasso selection.
+
+Lasso a group of cells, then split them by ``by`` (an ``obs`` column such as
+``"time"`` or ``"condition"``) and compare its levels:
+
+- ``group_a`` **and** ``group_b`` given → a single A-vs-B comparison
+  (e.g. ``group_a="D30", group_b="Y1"``); returns one DataFrame.
+- ``group_a`` only → that level vs the pooled rest of the selection; one DataFrame.
+- **neither** → ALL pairwise comparisons between the levels present in the
+  selection; returns a ``dict`` ``{"D30_vs_Y1": df, ...}``.
+
+Cells default to the current lasso ``selection`` (pass ``selection=`` to override:
+integer positions / obs_names / a boolean mask); if nothing is selected it falls
+back to **all** cells. Levels with fewer than ``min_cells`` cells in the selection
+are skipped (with a warning). Uses ``sc.tl.rank_genes_groups`` when scanpy is
+installed (same finite-logFC matrix routing as ``diff_expression``), else a Welch
+t-test. A single comparison is auto-saved to ``adata.uns`` like ``diff_expression``;
+the all-pairwise form only saves when you pass ``key_added``
+(each pair under ``f"{key_added}_{a}_vs_{b}"``). AnnData/MuData only.
+
+```python
+w.selection = some_cells                     # or lasso in the UI
+# all pairwise between the conditions in the lasso:
+res = w.diff_expression_by("condition")       # {"D30_vs_Y1": df, ...}
+# one specific pair:
+df  = w.diff_expression_by("condition", group_a="D30", group_b="Y1")
+# also available straight off the selection:
+res = w.selection.diff_expression_by("time")
+```
+
 ### `w.highlight(indices, color=None)`
 
 Persistently mark points with a crisp ring + size bump (the engine's

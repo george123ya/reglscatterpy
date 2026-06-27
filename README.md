@@ -269,6 +269,16 @@ a = w.selection            # after lassoing group A
 w.diff_expression(a, w.selection)
 ```
 
+Or split the lasso by an `obs` column (e.g. `condition` / `time`) and compare its
+levels — all pairwise, or a specific pair:
+
+```python
+w                                              # lasso a region
+w.diff_expression_by("condition")              # {"D30_vs_Y1": df, ...} (all pairs)
+w.diff_expression_by("condition", group_a="D30", group_b="Y1")   # one pair
+w.diff_expression_by("condition", group_a="Y1")                  # Y1 vs the rest
+```
+
 ## Richer tooltips
 
 Show extra fields on hover:
