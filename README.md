@@ -270,13 +270,15 @@ w.diff_expression(a, w.selection)
 ```
 
 Or split the lasso by an `obs` column (e.g. `condition` / `time`) and compare its
-levels — all pairwise, or a specific pair:
+levels. Each mode lands as **one clean scanpy-native** `adata.uns` entry (real
+`by` + level names), so `sc.pl.rank_genes_groups(adata)` works right after:
 
 ```python
 w                                              # lasso a region
-w.diff_expression_by("condition")              # {"D30_vs_Y1": df, ...} (all pairs)
-w.diff_expression_by("condition", group_a="D30", group_b="Y1")   # one pair
+w.diff_expression_by("condition")              # each level vs the rest -> {"D30": df, ...}
+w.diff_expression_by("condition", group_a="D30", group_b="Y1")   # one pair -> DataFrame
 w.diff_expression_by("condition", group_a="Y1")                  # Y1 vs the rest
+w.diff_expression_by("condition", key_added="cond_de")           # choose the uns key
 ```
 
 ## Richer tooltips

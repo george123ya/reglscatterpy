@@ -392,3 +392,76 @@ def test_bad_palette_suggests(adata):
 def test_wrong_length_raw_color_raises(adata):
     with pytest.raises(ValueError, match="length"):
         rs.scatterplot(adata, basis="umap", color_by=np.array([1.0, 2.0, 3.0]), show=False)
+
+
+# --- diff_expression_by: split a selection by an obs column ----------------- #
+def _de_anndata(n=180, g=30):
+    ad = pytest.importorskip("anndata")
+    rng = np.random.RandomState(3)
+    counts = rng.poisson(2, size=(n, g)).astype(float)
+    lognorm = np.log1p(counts)
+    cond = rng.choice(["D30", "Y1", "Y2"], n)
+    # plant a real signal in Gene0 for D30 (so it ranks top, logFC finite)
+    lognorm[cond == "D30", 0] += 5
+    Xs = (lognorm - lognorm.mean(0)) / (lognorm.std(0) + 1e-9)   # z-scored .X
+    names = [f"Gene{i}" for i in range(g)]
+    obs = pd.DataFrame(
+        {"condition": pd.Categorical(cond)},
+        index=[f"c{i}" for i in range(n)],
+    )
+    A = ad.AnnData(X=Xs, obs=obs, var=pd.DataFrame(index=names))
+    A.raw = ad.AnnData(X=lognorm, var=pd.DataFrame(index=names))   # log-norm for finite logFC
+    A.obsm["X_umap"] = rng.randn(n, 2)
+    return A
+
+
+def test_de_by_multi_is_one_clean_native_uns():
+    pytest.importorskip("scanpy")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    res = w.diff_expression_by("condition", n=5)
+    assert isinstance(res, dict) and set(res) == {"D30", "Y1", "Y2"}
+    # ONE native uns entry with the REAL column + level names (no _rs_by leak)
+    uns = A.uns["rank_genes_groups"]
+    assert uns["params"]["groupby"] == "condition"
+    assert set(uns["names"].dtype.names) == {"D30", "Y1", "Y2"}
+    # raw-routing gives finite logFC even though .X is z-scored, params stay clean
+    assert uns["params"]["layer"] is None
+    assert np.isfinite(np.asarray(res["D30"]["logfoldchanges"], float)).all()
+    assert res["D30"]["names"].iloc[0] == "Gene0"
+
+
+def test_de_by_pair_returns_frame_and_real_reference():
+    pytest.importorskip("scanpy")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    df = w.diff_expression_by("condition", group_a="D30", group_b="Y1",
+                              n=5, key_added="d30_v_y1")
+    assert isinstance(df, pd.DataFrame)
+    assert A.uns["d30_v_y1"]["params"]["reference"] == "Y1"
+
+
+def test_de_by_bad_column_lists_available():
+    pytest.importorskip("scanpy")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    with pytest.raises(KeyError, match="not an obs column"):
+        w.diff_expression_by("nope")
+
+
+def test_de_by_unknown_level_is_rejected():
+    pytest.importorskip("scanpy")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    with pytest.raises(ValueError, match="group_a"):
+        w.diff_expression_by("condition", group_a="NOPE")
+
+
+def test_de_by_exposed_on_compose_grid():
+    pytest.importorskip("scanpy")
+    A = _de_anndata()
+    w1 = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    w2 = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    grid = rs.compose([w1, w2], sync=True)
+    res = grid.diff_expression_by("condition", n=5)
+    assert isinstance(res, dict) and set(res) == {"D30", "Y1", "Y2"}

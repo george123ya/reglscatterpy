@@ -68,24 +68,35 @@ Lasso a group of cells, then split them by ``by`` (an ``obs`` column such as
 - ``group_a`` **and** ``group_b`` given → a single A-vs-B comparison
   (e.g. ``group_a="D30", group_b="Y1"``); returns one DataFrame.
 - ``group_a`` only → that level vs the pooled rest of the selection; one DataFrame.
-- **neither** → ALL pairwise comparisons between the levels present in the
-  selection; returns a ``dict`` ``{"D30_vs_Y1": df, ...}``.
+- **neither** → every present level vs the rest, run as a **single** scanpy
+  ``rank_genes_groups`` call (one-vs-rest, the scanpy idiom); returns a ``dict``
+  ``{level: df}``.
+
+Whichever the mode, the result is saved to ``adata.uns`` as **one clean
+scanpy-native entry** — the *real* ``by`` name and *real* level names in
+``params`` / columns (no synthetic ``_rs_by`` / ``_rs_lognorm``), so
+``sc.pl.rank_genes_groups(adata)`` works straight after. Default key
+``"rank_genes_groups"``; pass ``key_added`` to choose the key, or
+``key_added=False`` to skip saving.
 
 Cells default to the current lasso ``selection`` (pass ``selection=`` to override:
 integer positions / obs_names / a boolean mask); if nothing is selected it falls
-back to **all** cells. Levels with fewer than ``min_cells`` cells in the selection
-are skipped (with a warning). Uses ``sc.tl.rank_genes_groups`` when scanpy is
+back to **all** cells. In the all-levels mode, levels with fewer than ``min_cells``
+cells in the selection are skipped (with a warning); an explicit ``group_a`` /
+``group_b`` is always honoured. Uses ``sc.tl.rank_genes_groups`` when scanpy is
 installed (same finite-logFC matrix routing as ``diff_expression``), else a Welch
-t-test. A single comparison is auto-saved to ``adata.uns`` like ``diff_expression``;
-the all-pairwise form only saves when you pass ``key_added``
-(each pair under ``f"{key_added}_{a}_vs_{b}"``). AnnData/MuData only.
+t-test. AnnData/MuData only. Also exposed on a [`compose`](api.md#reglscatterpy.compose)
+grid (``grid.diff_expression_by(...)``, proxied to a shared panel).
 
 ```python
 w.selection = some_cells                     # or lasso in the UI
-# all pairwise between the conditions in the lasso:
-res = w.diff_expression_by("condition")       # {"D30_vs_Y1": df, ...}
-# one specific pair:
-df  = w.diff_expression_by("condition", group_a="D30", group_b="Y1")
+# every condition in the lasso vs the rest (one clean adata.uns entry):
+res = w.diff_expression_by("condition")       # {"D30": df, "Y1": df, "Y2": df}
+# one specific pair, saved under a custom uns key:
+df  = w.diff_expression_by("condition", group_a="D30", group_b="Y1",
+                           key_added="D30_vs_Y1")
+# one level vs the rest of the lasso:
+df  = w.diff_expression_by("condition", group_a="Y1")
 # also available straight off the selection:
 res = w.selection.diff_expression_by("time")
 ```

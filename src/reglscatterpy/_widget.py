@@ -475,6 +475,11 @@ def _make_classes():
             restricted to ``var_names``) so logFC is finite without dragging in
             non-HVG genes; fall back to a log-norm layer, else warn. Shared by
             :meth:`diff_expression` and :meth:`diff_expression_by`.
+
+            ``ad`` is always a throwaway copy, so for the ``adata.raw`` route we
+            overwrite ``ad.X`` in place rather than stashing a synthetic layer —
+            that keeps scanpy's saved ``uns[...]['params']`` clean (``layer: None``,
+            ``use_raw: False``) instead of leaking a cryptic ``"_rs_lognorm"`` name.
             """
             import warnings
 
@@ -495,8 +500,8 @@ def _make_classes():
                 if not _neg(ad.X):
                     _ur = False                                  # .X already log-norm
                 elif ad.raw is not None and set(ad.var_names).issubset(set(ad.raw.var_names)):
-                    ad.layers["_rs_lognorm"] = ad.raw[:, list(ad.var_names)].X
-                    _layer, _ur = "_rs_lognorm", False           # finite logFC, same genes
+                    ad.X = ad.raw[:, list(ad.var_names)].X       # finite logFC, same genes
+                    _layer, _ur = None, False                    # clean params, no leaked layer
                 else:
                     _cand = next((ln for ln in ("lognorm", "log1p", "logcounts", "data")
                                   if ln in ad.layers and not _neg(ad.layers[ln])), None)
@@ -622,22 +627,27 @@ def _make_classes():
 
             * ``group_a`` **and** ``group_b`` given -> a single A-vs-B comparison
               (e.g. ``group_a="D30", group_b="Y1"``); returns one DataFrame.
-            * ``group_a`` only -> that level vs the rest of the selection (pooled);
+            * ``group_a`` only -> that level vs the pooled rest of the selection;
               returns one DataFrame.
-            * **neither** -> ALL pairwise comparisons between the levels present in
-              the selection; returns a ``dict`` ``{"D30_vs_Y1": df, ...}``.
+            * **neither** -> every present level vs the rest, run as ONE scanpy
+              ``rank_genes_groups`` call (one-vs-rest, the scanpy idiom); returns a
+              ``dict`` ``{level: df}``.
+
+            Whichever the mode, the result is saved to ``adata.uns`` as a SINGLE
+            scanpy-native entry — with the REAL ``by`` name and REAL level names in
+            ``params`` / columns (no synthetic ``_rs_by`` / ``_rs_lognorm``), so
+            ``sc.pl.rank_genes_groups(adata)`` works straight after. Default key
+            ``"rank_genes_groups"``; pass ``key_added`` to choose the key, or
+            ``key_added=False`` to skip saving.
 
             Cells default to the current lasso ``selection`` (pass ``selection=`` to
             override, e.g. integer positions / obs_names / a boolean mask); if
-            nothing is selected it falls back to **all** cells. Levels with fewer
-            than ``min_cells`` cells in the selection are skipped (with a warning).
-
-            Uses ``sc.tl.rank_genes_groups`` when scanpy is installed (same finite-
-            logFC matrix routing as :meth:`diff_expression`), else a Welch t-test.
-            A single comparison is auto-saved to ``adata.uns`` like
-            :meth:`diff_expression`; the all-pairwise form only saves when you pass
-            ``key_added`` (each pair under ``f"{key_added}_{a}_vs_{b}"``).
-            AnnData/MuData only.
+            nothing is selected it falls back to **all** cells. In the all-levels
+            mode, levels with fewer than ``min_cells`` cells in the selection are
+            skipped (with a warning); an explicit ``group_a`` / ``group_b`` is always
+            honoured. Uses ``sc.tl.rank_genes_groups`` when scanpy is installed
+            (same finite-logFC matrix routing as :meth:`diff_expression`), else a
+            Welch t-test. AnnData/MuData only.
             """
             import warnings
 
@@ -662,7 +672,8 @@ def _make_classes():
                 if not sel:
                     sel = list(range(src.n_obs))   # nothing lassoed -> whole dataset
 
-            grp = frame[by].iloc[sel]
+            col = frame[by]
+            grp = col.iloc[sel]
             # Levels actually present (drop NaN); keep categorical order if any.
             if hasattr(grp, "cat"):
                 present = [lv for lv in grp.cat.categories if (grp == lv).any()]
@@ -671,13 +682,6 @@ def _make_classes():
             counts = {lv: int((grp == lv).sum()) for lv in present}
             usable = [lv for lv in present if counts[lv] >= min_cells]
             dropped = [lv for lv in present if counts[lv] < min_cells]
-            if dropped:
-                warnings.warn(
-                    f"diff_expression_by: skipping {len(dropped)} level(s) of '{by}' "
-                    f"with < {min_cells} cells in the selection: "
-                    f"{[f'{lv} (n={counts[lv]})' for lv in dropped]}",
-                    stacklevel=2,
-                )
 
             def _coerce(val, role):
                 # accept the level as given or stringified (categoricals print as str)
@@ -692,90 +696,90 @@ def _make_classes():
             ga = None if group_a is None else _coerce(group_a, "group_a")
             gb = None if group_b is None else _coerce(group_b, "group_b")
 
-            # Build the list of (a, b) comparisons to run.
+            # Decide the comparison: which level(s) are tested, the reference,
+            # which levels' cells to keep, and whether the result is a dict (multi).
             if ga is not None and gb is not None:
-                pairs = [(ga, gb)]
+                groups, reference, keep_levels, multi = [ga], gb, [ga, gb], False
             elif ga is not None:
-                pairs = [(ga, "rest")]                       # level vs pooled rest
+                if len(present) < 2:
+                    raise ValueError(
+                        f"group_a={group_a!r} vs rest needs >= 2 levels of '{by}' in "
+                        f"the selection; only {present} present."
+                    )
+                groups, reference, keep_levels, multi = [ga], "rest", list(present), False
             else:
-                from itertools import combinations
+                if dropped:
+                    warnings.warn(
+                        f"diff_expression_by: skipping {len(dropped)} level(s) of "
+                        f"'{by}' with < {min_cells} cells in the selection: "
+                        f"{[f'{lv} (n={counts[lv]})' for lv in dropped]}",
+                        stacklevel=2,
+                    )
                 if len(usable) < 2:
                     raise ValueError(
                         f"need >= 2 levels of '{by}' with >= {min_cells} cells in the "
-                        f"selection for pairwise DE; got {usable or present}."
+                        f"selection; got {usable or present}."
                     )
-                pairs = list(combinations(usable, 2))
+                groups, reference, keep_levels, multi = list(usable), "rest", list(usable), True
 
-            # "rest" = all OTHER selected cells (so comparisons stay inside the
-            # lasso); cells outside the selection are never tested.
-            grp_full = frame[by]
+            # Cells in the comparison = selected cells whose level is kept.
+            keep_str = {str(lv) for lv in keep_levels}
+            keep = [i for i in sel if str(col.iloc[i]) in keep_str]
+            g_str = [str(lv) for lv in groups]
+            ref_str = reference if reference == "rest" else str(reference)
 
-            def _one(a, b):
-                # labels: a -> "A", b (or pooled rest) -> "B", everything else excluded
-                labels = np.array(["_excl"] * src.n_obs, dtype=object)
-                for i in sel:
-                    v = grp_full.iloc[i]
-                    if v == a:
-                        labels[i] = "A"
-                    elif b == "rest":
-                        if v in present:        # any other selected, non-NaN cell
-                            labels[i] = "B"
-                    elif v == b:
-                        labels[i] = "B"
-                a_mask = labels == "A"
-                b_mask = labels == "B"
-                if not a_mask.any() or not b_mask.any():
-                    return None
+            save_to = (None if key_added is False or not hasattr(src, "uns")
+                       else (key_added or "rank_genes_groups"))
 
-                _key = None
-                if type(src).__name__ == "AnnData":
-                    try:
-                        import scanpy as sc
+            # --- scanpy path: ONE rank_genes_groups call on the real `by` column ---
+            if type(src).__name__ == "AnnData":
+                try:
+                    import scanpy as sc
 
-                        ad = src[a_mask | b_mask].copy()
-                        ad.obs["_rs_by"] = pd.Categorical(labels[a_mask | b_mask])
-                        _layer, _ur = self._pick_expr_matrix(ad, layer, use_raw)
-                        sc.tl.rank_genes_groups(
-                            ad, "_rs_by", groups=["A"], reference="B",
-                            method=method, layer=_layer, n_genes=n,
-                            key_added="rank_genes_groups", use_raw=_ur,
-                        )
-                        df = (sc.get.rank_genes_groups_df(ad, group="A")
-                              .head(n).reset_index(drop=True))
-                        return df, ad.uns.get("rank_genes_groups")
-                    except ImportError:
-                        pass
-                X = src.layers[layer] if layer else src.X
-                return self._ttest_de(X, a_mask, b_mask, src.var_names, n), None
-
-            base_key = (None if key_added is False else key_added)
-
-            # Single comparison -> one DataFrame (auto-saved like diff_expression).
-            if len(pairs) == 1:
-                a, b = pairs[0]
-                out = _one(a, b)
-                if out is None:
-                    raise ValueError(
-                        f"comparison {a} vs {b} has an empty side after filtering."
+                    ad = src[keep].copy()
+                    # rebuild `by` as a clean categorical of just the kept levels,
+                    # keeping the REAL column name so uns[...]['params'] reads true.
+                    ad.obs[by] = pd.Categorical(
+                        ad.obs[by].astype(str),
+                        categories=[str(lv) for lv in keep_levels],
                     )
-                df, native = out
-                save_to = (base_key or "rank_genes_groups") if hasattr(src, "uns") else None
-                if save_to is not None:
-                    src.uns[save_to] = native if native is not None else df
-                return df
+                    _layer, _ur = self._pick_expr_matrix(ad, layer, use_raw)
+                    _key = save_to or "rank_genes_groups"
+                    sc.tl.rank_genes_groups(
+                        ad, by, groups=g_str, reference=ref_str,
+                        method=method, layer=_layer, n_genes=n, key_added=_key,
+                        use_raw=_ur,
+                    )
+                    if save_to is not None:
+                        src.uns[save_to] = ad.uns.get(_key)   # one clean native entry
+                    frames = {g: sc.get.rank_genes_groups_df(ad, group=g, key=_key)
+                                   .head(n).reset_index(drop=True) for g in g_str}
+                    return frames if multi else frames[g_str[0]]
+                except ImportError:
+                    pass  # fall through to the Welch t-test
 
-            # All-pairwise -> dict keyed "A_vs_B"; only save when key_added given.
-            results = {}
-            for a, b in pairs:
-                out = _one(a, b)
-                if out is None:
-                    continue
-                df, native = out
-                key = f"{a}_vs_{b}"
-                results[key] = df
-                if base_key and hasattr(src, "uns") and native is not None:
-                    src.uns[f"{base_key}_{key}"] = native
-            return results
+            # --- no-scanpy fallback: Welch t-test per group vs its reference ---
+            X = src.layers[layer] if layer else src.X
+
+            def _mask(level_strs):
+                m = np.zeros(src.n_obs, dtype=bool)
+                for i in keep:
+                    if str(col.iloc[i]) in level_strs:
+                        m[i] = True
+                return m
+
+            frames = {}
+            for g in g_str:
+                a_mask = _mask({g})
+                b_mask = (_mask({s for s in keep_str if s != g})
+                          if ref_str == "rest" else _mask({ref_str}))
+                if a_mask.any() and b_mask.any():
+                    frames[g] = self._ttest_de(X, a_mask, b_mask, src.var_names, n)
+            if not frames:
+                raise ValueError("every comparison had an empty side after filtering.")
+            if save_to is not None:
+                src.uns[save_to] = frames if multi else frames[g_str[0]]
+            return frames if multi else frames[g_str[0]]
 
         def __repr__(self):
             spec = getattr(self, "_spec", None) or {}

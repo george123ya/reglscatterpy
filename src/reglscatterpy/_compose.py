@@ -35,7 +35,8 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync="auto"):
     Returns
     -------
     A ``GridBox`` (subclass) of the plots. When linked it exposes the group's
-    ``selection`` / ``filtered`` / ``subset`` / ``composition`` / ``diff_expression``;
+    ``selection`` / ``filtered`` / ``subset`` / ``composition`` / ``annotate`` /
+    ``diff_expression`` / ``diff_expression_by`` (all proxied to a shared panel);
     either way ``grid.panels`` gives the per-panel widgets (e.g.
     ``grid.panels[0].filtered``).
     """
@@ -216,6 +217,9 @@ def _composed_plots_class():
 
         def diff_expression(self, *a, **k):
             return self._primary.diff_expression(*a, **k)
+
+        def diff_expression_by(self, *a, **k):
+            return self._primary.diff_expression_by(*a, **k)
 
         def composition(self, *a, **k):
             return self._primary.composition(*a, **k)
