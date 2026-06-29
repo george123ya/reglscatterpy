@@ -48,14 +48,17 @@ Top differential genes between two cell groups.
 ``group_a`` defaults to the lasso selection; ``group_b`` to the rest.
 Groups accept integer positions, obs_names, or a boolean mask. When
 **scanpy** is installed (and the source is an AnnData) this runs
-``sc.tl.rank_genes_groups`` on a copy and returns its result frame
-(names / scores / logfoldchanges / pvals / pvals_adj). Otherwise it
-falls back to a Welch t-test. AnnData/MuData only.
+``sc.tl.rank_genes_groups`` on a copy; otherwise it falls back to a Welch
+t-test. AnnData/MuData only.
 
-When the source is an **AnnData** the result is **auto-saved** to
-``adata.uns`` (scanpy-style) — default key ``"rank_genes_groups"`` (the
-scanpy convention), or ``key_added`` if you pass one. Pass
-``key_added=False`` to skip saving.
+**Returns the scanpy-native result** — the ``params`` + rec.array dict
+(``names`` / ``scores`` / ``logfoldchanges`` / ``pvals`` / ``pvals_adj``),
+identical to what scanpy stores in ``adata.uns``. The return value and the
+saved entry are the same object, and a tidy table is one
+``sc.get.rank_genes_groups_df(adata, group="A")`` away. When the source is an
+**AnnData** it is also **auto-saved** to ``adata.uns`` — default key
+``"rank_genes_groups"``, or ``key_added`` if you pass one; ``key_added=False``
+skips saving.
 
 ### `w.diff_expression_by(by, group_a=None, group_b=None, selection=None, n=10, layer=None, method='wilcoxon', key_added=None, use_raw=None, min_cells=2)`
 
@@ -66,18 +69,21 @@ Lasso a group of cells, then split them by ``by`` (an ``obs`` column such as
 ``"time"`` or ``"condition"``) and compare its levels:
 
 - ``group_a`` **and** ``group_b`` given → a single A-vs-B comparison
-  (e.g. ``group_a="D30", group_b="Y1"``); returns one DataFrame.
-- ``group_a`` only → that level vs the pooled rest of the selection; one DataFrame.
+  (e.g. ``group_a="D30", group_b="Y1"``).
+- ``group_a`` only → that level vs the pooled rest of the selection.
 - **neither** → every present level vs the rest, run as a **single** scanpy
-  ``rank_genes_groups`` call (one-vs-rest, the scanpy idiom); returns a ``dict``
-  ``{level: df}``.
+  ``rank_genes_groups`` call (one-vs-rest, the scanpy idiom).
 
-Whichever the mode, the result is saved to ``adata.uns`` as **one clean
-scanpy-native entry** — the *real* ``by`` name and *real* level names in
-``params`` / columns (no synthetic ``_rs_by`` / ``_rs_lognorm``), so
-``sc.pl.rank_genes_groups(adata)`` works straight after. Default key
-``"rank_genes_groups"``; pass ``key_added`` to choose the key, or
-``key_added=False`` to skip saving.
+**Returns the scanpy-native result** in every mode — the ``params`` + rec.array
+dict (``names`` / ``scores`` / ``logfoldchanges`` / ``pvals`` / ``pvals_adj``),
+exactly like ``diff_expression`` and exactly what scanpy stores: one comparison
+gives one group column, the one-vs-rest form gives one column per level. The
+*real* ``by`` name and *real* level names appear in ``params`` / the rec.array
+fields (no synthetic ``_rs_by`` / ``_rs_lognorm``), so
+``sc.pl.rank_genes_groups(adata)`` and
+``sc.get.rank_genes_groups_df(adata, group=...)`` work straight after. The same
+object is **auto-saved** to ``adata.uns`` — default key ``"rank_genes_groups"``;
+pass ``key_added`` to choose the key, or ``key_added=False`` to skip saving.
 
 Cells default to the current lasso ``selection`` (pass ``selection=`` to override:
 integer positions / obs_names / a boolean mask); if nothing is selected it falls
@@ -89,14 +95,19 @@ t-test. AnnData/MuData only. Also exposed on a [`compose`](api.md#reglscatterpy.
 grid (``grid.diff_expression_by(...)``, proxied to a shared panel).
 
 ```python
+import scanpy as sc
 w.selection = some_cells                     # or lasso in the UI
-# every condition in the lasso vs the rest (one clean adata.uns entry):
-res = w.diff_expression_by("condition")       # {"D30": df, "Y1": df, "Y2": df}
+
+# every condition in the lasso vs the rest -> scanpy-native result (== adata.uns):
+res = w.diff_expression_by("condition")       # params + rec.arrays, one col per level
+res["names"].dtype.names                      # ('D30', 'Y1', 'Y2')
+sc.get.rank_genes_groups_df(adata, group="D30")   # tidy table for any level
+
 # one specific pair, saved under a custom uns key:
-df  = w.diff_expression_by("condition", group_a="D30", group_b="Y1",
+res = w.diff_expression_by("condition", group_a="D30", group_b="Y1",
                            key_added="D30_vs_Y1")
 # one level vs the rest of the lasso:
-df  = w.diff_expression_by("condition", group_a="Y1")
+res = w.diff_expression_by("condition", group_a="Y1")
 # also available straight off the selection:
 res = w.selection.diff_expression_by("time")
 ```

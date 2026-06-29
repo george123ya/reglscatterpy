@@ -544,6 +544,24 @@ def _make_classes():
             res = res.reindex(res["stat"].abs().sort_values(ascending=False).index)
             return res.head(n).reset_index(drop=True)
 
+        def _native_from_ttests(self, results, groups, params):
+            """Assemble a scanpy-style ``rank_genes_groups`` result (a ``params``
+            dict + one rec.array per field, each keyed by group) from the no-scanpy
+            Welch t-test frames — so the fallback returns the SAME structure scanpy
+            stores in ``adata.uns`` (``names`` / ``scores`` / ``logfoldchanges`` /
+            ``pvals`` / ``pvals_adj``)."""
+            import numpy as np
+
+            field_src = {                       # uns field  <-  _ttest_de column
+                "names": "gene", "scores": "stat", "logfoldchanges": "logFC",
+                "pvals": "pval", "pvals_adj": "pval",   # no multi-test correction offline
+            }
+            out = {"params": params}
+            for field, col in field_src.items():
+                arrays = [np.asarray(results[g][col].to_numpy()) for g in groups]
+                out[field] = np.rec.fromarrays(arrays, names=[str(g) for g in groups])
+            return out
+
         def diff_expression(self, group_a=None, group_b=None, n=10, layer=None,
                             method="wilcoxon", key_added=None, use_raw=None):
             """Top differential genes between two cell groups.
@@ -551,14 +569,17 @@ def _make_classes():
             ``group_a`` defaults to the lasso selection; ``group_b`` to the rest.
             Groups accept integer positions, obs_names, or a boolean mask. When
             **scanpy** is installed (and the source is an AnnData) this runs
-            ``sc.tl.rank_genes_groups`` on a copy and returns its result frame
-            (names / scores / logfoldchanges / pvals / pvals_adj). Otherwise it
-            falls back to a Welch t-test. AnnData/MuData only.
+            ``sc.tl.rank_genes_groups`` on a copy. Otherwise it falls back to a
+            Welch t-test. AnnData/MuData only.
 
-            When the source is an **AnnData** the result is **auto-saved** to
-            ``adata.uns`` (scanpy-style) — default key ``"rank_genes_groups"`` (the
-            scanpy convention), or ``key_added`` if you pass one. Pass
-            ``key_added=False`` to skip saving.
+            **Returns the scanpy-native result** — the ``params`` + rec.array dict
+            (``names`` / ``scores`` / ``logfoldchanges`` / ``pvals`` /
+            ``pvals_adj``), identical to what scanpy stores in ``adata.uns`` (so the
+            return value and the saved entry are the same object, and a tidy table
+            is one ``sc.get.rank_genes_groups_df(adata, group="A")`` away). When the
+            source is an **AnnData** it is also **auto-saved** to ``adata.uns`` —
+            default key ``"rank_genes_groups"``, or ``key_added`` if you pass one;
+            ``key_added=False`` skips saving.
             """
             import numpy as np
             import pandas as pd
@@ -579,13 +600,8 @@ def _make_classes():
 
             # Auto-save when the source has .uns (AnnData). Default to scanpy's
             # 'rank_genes_groups' key; key_added overrides; key_added=False disables.
-            _save_to = (None if key_added is False or not hasattr(src, "uns")
-                        else (key_added or "rank_genes_groups"))
-
-            def _save(df, uns_native=None):
-                if _save_to is not None:
-                    src.uns[_save_to] = uns_native if uns_native is not None else df
-                return df
+            save_to = (None if key_added is False or not hasattr(src, "uns")
+                       else (key_added or "rank_genes_groups"))
 
             # Preferred path: scanpy's rank_genes_groups (AnnData only).
             if type(src).__name__ == "AnnData":
@@ -593,28 +609,34 @@ def _make_classes():
                     import scanpy as sc
 
                     ad = src.copy()
-                    ad.obs["_rs_grp"] = pd.Categorical(labels)
-                    _key = _save_to or "rank_genes_groups"
+                    ad.obs["group"] = pd.Categorical(labels)
+                    _key = save_to or "rank_genes_groups"
 
                     # Pick the expression matrix so logFC is finite (see helper).
                     _layer, _ur = self._pick_expr_matrix(ad, layer, use_raw)
 
                     sc.tl.rank_genes_groups(
-                        ad, "_rs_grp", groups=["A"], reference=ref,
+                        ad, "group", groups=["A"], reference=ref,
                         method=method, layer=_layer, n_genes=n, key_added=_key,
                         use_raw=_ur,
                     )
-                    df = sc.get.rank_genes_groups_df(ad, group="A", key=_key).head(n).reset_index(drop=True)
-                    # store the scanpy-NATIVE uns structure on the real adata, so
-                    # sc.pl.rank_genes_groups(adata) etc. work afterwards.
-                    return _save(df, uns_native=ad.uns.get(_key))
+                    native = ad.uns.get(_key)   # the scanpy-native result dict
+                    if save_to is not None:
+                        src.uns[save_to] = native
+                    return native
                 except ImportError:
                     pass  # fall back to the built-in test below
 
             a_mask = labels == "A"
             b_mask = labels == ref
             X = src.layers[layer] if layer else src.X
-            return _save(self._ttest_de(X, a_mask, b_mask, src.var_names, n))
+            res = self._ttest_de(X, a_mask, b_mask, src.var_names, n)
+            params = {"groupby": "group", "reference": ref, "method": "t-test",
+                      "use_raw": bool(use_raw), "layer": layer, "corr_method": "none"}
+            native = self._native_from_ttests({"A": res}, ["A"], params)
+            if save_to is not None:
+                src.uns[save_to] = native
+            return native
 
         def diff_expression_by(self, by, group_a=None, group_b=None, selection=None,
                                n=10, layer=None, method="wilcoxon", key_added=None,
@@ -626,19 +648,22 @@ def _make_classes():
             such as ``"time"`` or ``"condition"``) and compare its levels:
 
             * ``group_a`` **and** ``group_b`` given -> a single A-vs-B comparison
-              (e.g. ``group_a="D30", group_b="Y1"``); returns one DataFrame.
-            * ``group_a`` only -> that level vs the pooled rest of the selection;
-              returns one DataFrame.
+              (e.g. ``group_a="D30", group_b="Y1"``).
+            * ``group_a`` only -> that level vs the pooled rest of the selection.
             * **neither** -> every present level vs the rest, run as ONE scanpy
-              ``rank_genes_groups`` call (one-vs-rest, the scanpy idiom); returns a
-              ``dict`` ``{level: df}``.
+              ``rank_genes_groups`` call (one-vs-rest, the scanpy idiom).
 
-            Whichever the mode, the result is saved to ``adata.uns`` as a SINGLE
-            scanpy-native entry — with the REAL ``by`` name and REAL level names in
-            ``params`` / columns (no synthetic ``_rs_by`` / ``_rs_lognorm``), so
-            ``sc.pl.rank_genes_groups(adata)`` works straight after. Default key
-            ``"rank_genes_groups"``; pass ``key_added`` to choose the key, or
-            ``key_added=False`` to skip saving.
+            **Returns the scanpy-native result** in every mode — the ``params`` +
+            rec.array dict (``names`` / ``scores`` / ``logfoldchanges`` / ``pvals``
+            / ``pvals_adj``), exactly like :meth:`diff_expression` and exactly what
+            scanpy stores, so the API stays coherent: one comparison gives one group
+            column, the one-vs-rest form gives one column per level. The REAL ``by``
+            name and REAL level names appear in ``params`` / the rec.array fields (no
+            synthetic ``_rs_by`` / ``_rs_lognorm``), so ``sc.pl.rank_genes_groups(
+            adata)`` and ``sc.get.rank_genes_groups_df(adata, group=...)`` work
+            straight after. The same object is **auto-saved** to ``adata.uns`` —
+            default key ``"rank_genes_groups"``; pass ``key_added`` to choose the
+            key, or ``key_added=False`` to skip saving.
 
             Cells default to the current lasso ``selection`` (pass ``selection=`` to
             override, e.g. integer positions / obs_names / a boolean mask); if
@@ -696,17 +721,17 @@ def _make_classes():
             ga = None if group_a is None else _coerce(group_a, "group_a")
             gb = None if group_b is None else _coerce(group_b, "group_b")
 
-            # Decide the comparison: which level(s) are tested, the reference,
-            # which levels' cells to keep, and whether the result is a dict (multi).
+            # Decide the comparison: which level(s) are tested, the reference, and
+            # which levels' cells to keep.
             if ga is not None and gb is not None:
-                groups, reference, keep_levels, multi = [ga], gb, [ga, gb], False
+                groups, reference, keep_levels = [ga], gb, [ga, gb]
             elif ga is not None:
                 if len(present) < 2:
                     raise ValueError(
                         f"group_a={group_a!r} vs rest needs >= 2 levels of '{by}' in "
                         f"the selection; only {present} present."
                     )
-                groups, reference, keep_levels, multi = [ga], "rest", list(present), False
+                groups, reference, keep_levels = [ga], "rest", list(present)
             else:
                 if dropped:
                     warnings.warn(
@@ -720,7 +745,7 @@ def _make_classes():
                         f"need >= 2 levels of '{by}' with >= {min_cells} cells in the "
                         f"selection; got {usable or present}."
                     )
-                groups, reference, keep_levels, multi = list(usable), "rest", list(usable), True
+                groups, reference, keep_levels = list(usable), "rest", list(usable)
 
             # Cells in the comparison = selected cells whose level is kept.
             keep_str = {str(lv) for lv in keep_levels}
@@ -750,15 +775,15 @@ def _make_classes():
                         method=method, layer=_layer, n_genes=n, key_added=_key,
                         use_raw=_ur,
                     )
+                    native = ad.uns.get(_key)   # one clean scanpy-native entry
                     if save_to is not None:
-                        src.uns[save_to] = ad.uns.get(_key)   # one clean native entry
-                    frames = {g: sc.get.rank_genes_groups_df(ad, group=g, key=_key)
-                                   .head(n).reset_index(drop=True) for g in g_str}
-                    return frames if multi else frames[g_str[0]]
+                        src.uns[save_to] = native
+                    return native
                 except ImportError:
                     pass  # fall through to the Welch t-test
 
-            # --- no-scanpy fallback: Welch t-test per group vs its reference ---
+            # --- no-scanpy fallback: Welch t-test per group vs its reference,
+            # assembled into the SAME scanpy-native structure. ---
             X = src.layers[layer] if layer else src.X
 
             def _mask(level_strs):
@@ -768,18 +793,21 @@ def _make_classes():
                         m[i] = True
                 return m
 
-            frames = {}
+            results = {}
             for g in g_str:
                 a_mask = _mask({g})
                 b_mask = (_mask({s for s in keep_str if s != g})
                           if ref_str == "rest" else _mask({ref_str}))
                 if a_mask.any() and b_mask.any():
-                    frames[g] = self._ttest_de(X, a_mask, b_mask, src.var_names, n)
-            if not frames:
+                    results[g] = self._ttest_de(X, a_mask, b_mask, src.var_names, n)
+            if not results:
                 raise ValueError("every comparison had an empty side after filtering.")
+            params = {"groupby": by, "reference": ref_str, "method": "t-test",
+                      "use_raw": bool(use_raw), "layer": layer, "corr_method": "none"}
+            native = self._native_from_ttests(results, list(results), params)
             if save_to is not None:
-                src.uns[save_to] = frames if multi else frames[g_str[0]]
-            return frames if multi else frames[g_str[0]]
+                src.uns[save_to] = native
+            return native
 
         def __repr__(self):
             spec = getattr(self, "_spec", None) or {}

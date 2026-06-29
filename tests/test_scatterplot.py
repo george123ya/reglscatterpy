@@ -415,30 +415,44 @@ def _de_anndata(n=180, g=30):
     return A
 
 
-def test_de_by_multi_is_one_clean_native_uns():
+def test_de_by_returns_scanpy_native_and_one_clean_uns():
     pytest.importorskip("scanpy")
     A = _de_anndata()
     w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
     res = w.diff_expression_by("condition", n=5)
-    assert isinstance(res, dict) and set(res) == {"D30", "Y1", "Y2"}
-    # ONE native uns entry with the REAL column + level names (no _rs_by leak)
-    uns = A.uns["rank_genes_groups"]
-    assert uns["params"]["groupby"] == "condition"
-    assert set(uns["names"].dtype.names) == {"D30", "Y1", "Y2"}
+    # native scanpy result: a dict of params + rec.arrays (NOT a dict of frames),
+    # and the SAME object that lands in adata.uns
+    assert isinstance(res, dict) and "params" in res and "names" in res
+    assert res is A.uns["rank_genes_groups"]
+    # REAL column + level names (no _rs_by leak); one column per level
+    assert res["params"]["groupby"] == "condition"
+    assert set(res["names"].dtype.names) == {"D30", "Y1", "Y2"}
     # raw-routing gives finite logFC even though .X is z-scored, params stay clean
-    assert uns["params"]["layer"] is None
-    assert np.isfinite(np.asarray(res["D30"]["logfoldchanges"], float)).all()
-    assert res["D30"]["names"].iloc[0] == "Gene0"
+    assert res["params"]["layer"] is None
+    assert np.isfinite(np.asarray(res["logfoldchanges"]["D30"], float)).all()
+    assert res["names"]["D30"][0] == "Gene0"
 
 
-def test_de_by_pair_returns_frame_and_real_reference():
+def test_de_by_pair_returns_native_single_group_and_real_reference():
     pytest.importorskip("scanpy")
     A = _de_anndata()
     w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
-    df = w.diff_expression_by("condition", group_a="D30", group_b="Y1",
-                              n=5, key_added="d30_v_y1")
-    assert isinstance(df, pd.DataFrame)
+    res = w.diff_expression_by("condition", group_a="D30", group_b="Y1",
+                               n=5, key_added="d30_v_y1")
+    # coherent: same native shape, just one group column
+    assert isinstance(res, dict) and set(res["names"].dtype.names) == {"D30"}
+    assert res["params"]["reference"] == "Y1"
     assert A.uns["d30_v_y1"]["params"]["reference"] == "Y1"
+
+
+def test_diff_expression_returns_native():
+    pytest.importorskip("scanpy")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    res = w.diff_expression(group_a=list(range(40)), n=5)
+    assert isinstance(res, dict) and "params" in res and "names" in res
+    assert res is A.uns["rank_genes_groups"]
+    assert "A" in res["names"].dtype.names
 
 
 def test_de_by_bad_column_lists_available():
@@ -464,4 +478,4 @@ def test_de_by_exposed_on_compose_grid():
     w2 = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
     grid = rs.compose([w1, w2], sync=True)
     res = grid.diff_expression_by("condition", n=5)
-    assert isinstance(res, dict) and set(res) == {"D30", "Y1", "Y2"}
+    assert isinstance(res, dict) and set(res["names"].dtype.names) == {"D30", "Y1", "Y2"}

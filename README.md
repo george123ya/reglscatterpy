@@ -259,10 +259,17 @@ rs.scatterplot(adata, x="X_umap", color_by="cell_type")
 
 Lasso a population and get its top markers vs the rest (or vs another lasso):
 
+Both DE calls **return scanpy's native result** (the `params` + rec.array dict,
+the same object saved to `adata.uns`), so they're coherent with scanpy —
+`sc.pl.rank_genes_groups(adata)` and `sc.get.rank_genes_groups_df(adata, group=...)`
+work right after:
+
 ```python
+import scanpy as sc
 w = rs.scatterplot(adata, basis="umap", color_by="leiden", interactive=True)
 w                          # lasso a cluster
-w.diff_expression(n=10)    # top genes for the selection vs all other cells
+w.diff_expression(n=10)    # -> adata.uns["rank_genes_groups"] (selection "A" vs rest)
+sc.get.rank_genes_groups_df(adata, group="A")        # tidy table when you want one
 # or two saved selections:
 a = w.selection            # after lassoing group A
 # (lasso group B)
@@ -271,12 +278,13 @@ w.diff_expression(a, w.selection)
 
 Or split the lasso by an `obs` column (e.g. `condition` / `time`) and compare its
 levels. Each mode lands as **one clean scanpy-native** `adata.uns` entry (real
-`by` + level names), so `sc.pl.rank_genes_groups(adata)` works right after:
+`by` + level names), one column per level:
 
 ```python
 w                                              # lasso a region
-w.diff_expression_by("condition")              # each level vs the rest -> {"D30": df, ...}
-w.diff_expression_by("condition", group_a="D30", group_b="Y1")   # one pair -> DataFrame
+res = w.diff_expression_by("condition")        # each level vs the rest -> native result
+res["names"].dtype.names                       # ('D30', 'Y1', 'Y2')
+w.diff_expression_by("condition", group_a="D30", group_b="Y1")   # one pair
 w.diff_expression_by("condition", group_a="Y1")                  # Y1 vs the rest
 w.diff_expression_by("condition", key_added="cond_de")           # choose the uns key
 ```
