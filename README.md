@@ -3,9 +3,10 @@
 [![PyPI](https://img.shields.io/pypi/v/reglscatterpy.svg)](https://pypi.org/project/reglscatterpy/)
 [![Python versions](https://img.shields.io/pypi/pyversions/reglscatterpy.svg)](https://pypi.org/project/reglscatterpy/)
 [![Docs](https://img.shields.io/badge/docs-github.io-blue.svg)](https://george123ya.github.io/reglscatterpy/)
+[![Live demo](https://img.shields.io/badge/live%20demo-pbmc3k-brightgreen.svg)](https://george123ya.github.io/reglscatterpy/demo/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-📖 **[Full documentation & API reference →](https://george123ya.github.io/reglscatterpy/)**
+📖 **[Full documentation & API reference →](https://george123ya.github.io/reglscatterpy/)**  ·  ▶️ **[Try the live demo (real pbmc3k) →](https://george123ya.github.io/reglscatterpy/demo/)**
 
 Interactive WebGL scatterplots for single-cell / spatial data in Python —
 **AnnData, MuData, SpatialData**, pandas, numpy. Renders millions of points in
@@ -116,6 +117,11 @@ beyond that. `progressive=True` always uses the live (interactive) widget.
 | ![Categorical UMAP with frosted legend](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/umap-categorical.png) | ![Gene-expression UMAP with colour bar](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/umap-continuous.png) |
 | **`filter_by` distribution sliders** | **Linked grid (`compose`)** |
 | ![Range-filter sliders with histograms](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/filter-sliders.png) | ![Two embeddings with synced camera and selection](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/linked-grid.png) |
+
+The UMAP panels are rendered from **real pbmc3k** (2,638 PBMCs). Regenerate the
+figures and the [live demo](https://george123ya.github.io/reglscatterpy/demo/)
+with the maintainer scripts — see [`scripts/README.md`](https://github.com/george123ya/reglscatterpy/blob/main/scripts/README.md)
+(`build_demo.py`, `build_screens.py`, `record_to_gif.sh`).
 
 ## Static by default, interactive on request
 
