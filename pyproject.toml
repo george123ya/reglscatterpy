@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "reglscatterpy"
-version = "0.6.34"
+version = "0.6.35"
 description = "Interactive WebGL scatterplots for single-cell data (AnnData/MuData/SpatialData) in Jupyter, VS Code and Shiny for Python"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -38,6 +38,10 @@ mudata = ["mudata"]
 spatial = ["spatialdata"]
 # Whole-notebook -> standalone HTML report (save_notebook_html).
 report = ["nbconvert>=7", "nbformat", "ipykernel"]
+# GPU-accelerated differential expression (diff_expression(engine="gpu")).
+# Needs a CUDA machine; swap for cupy-cuda11x on CUDA 11. For engine="rapids"
+# install the full RAPIDS stack (rapids-singlecell) separately.
+gpu = ["cupy-cuda12x"]
 all = ["jupyter-scatter>=0.18", "anndata", "mudata", "spatialdata"]
 dev = ["pytest", "anndata", "scipy", "anywidget>=0.9", "nbconvert>=7", "ipykernel"]
 # Build the documentation site (mkdocs build / mkdocs serve).

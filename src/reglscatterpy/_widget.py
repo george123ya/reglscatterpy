@@ -518,9 +518,15 @@ def _make_classes():
                         )
             return _layer, _ur
 
-        def _ttest_de(self, X, a_mask, b_mask, var_names, n):
+        def _ttest_de(self, X, a_mask, b_mask, var_names, n, gpu=False):
             """No-scanpy fallback: Welch t-test of group A vs B over ``X`` rows.
-            Returns the top-``n`` genes by |stat| as a tidy DataFrame."""
+            Returns the top-``n`` genes by |stat| as a tidy DataFrame.
+
+            With ``gpu=True`` the per-cell reductions (the ``O(cells x genes)``
+            bottleneck) run on the GPU via ``cupy``; the final per-gene t-stat and
+            two-sided p-value (Welch-Satterthwaite dof) are computed on the small
+            ``(genes,)`` vectors. The formula matches scipy's ``ttest_ind(...,
+            equal_var=False)``, so GPU and CPU results agree to floating point."""
             import numpy as np
             import pandas as pd
 
@@ -528,6 +534,32 @@ def _make_classes():
             if hasattr(Xa, "toarray"):
                 Xa, Xb = Xa.toarray(), Xb.toarray()
             Xa, Xb = np.asarray(Xa, dtype="float64"), np.asarray(Xb, dtype="float64")
+            na, nb = Xa.shape[0], Xb.shape[0]
+            if gpu:
+                import cupy as cp
+
+                ga, gb = cp.asarray(Xa), cp.asarray(Xb)
+                ma_g, mb_g = ga.mean(0), gb.mean(0)
+                va_g, vb_g = ga.var(0, ddof=1), gb.var(0, ddof=1)     # GPU reductions
+                ma, mb = cp.asnumpy(ma_g), cp.asnumpy(mb_g)
+                va, vb = cp.asnumpy(va_g), cp.asnumpy(vb_g)
+                del ga, gb                                            # free VRAM
+                lfc = np.log2((ma + 1e-9) / (mb + 1e-9))
+                sa, sb = va / na, vb / nb
+                stat = (ma - mb) / (np.sqrt(sa + sb) + 1e-300)
+                try:
+                    from scipy import stats
+                    df = (sa + sb) ** 2 / (sa ** 2 / (na - 1) + sb ** 2 / (nb - 1) + 1e-300)
+                    pval = 2 * stats.t.sf(np.abs(stat), df)
+                except Exception:  # pragma: no cover - scipy optional
+                    pval = np.full(ma.shape, np.nan)
+                res = pd.DataFrame({
+                    "gene": np.asarray(var_names),
+                    "logFC": lfc, "stat": stat, "pval": pval,
+                    "mean_A": ma, "mean_B": mb,
+                })
+                res = res.reindex(res["stat"].abs().sort_values(ascending=False).index)
+                return res.head(n).reset_index(drop=True)
             ma, mb = Xa.mean(0), Xb.mean(0)
             lfc = np.log2((ma + 1e-9) / (mb + 1e-9))
             try:
@@ -562,15 +594,125 @@ def _make_classes():
                 out[field] = np.rec.fromarrays(arrays, names=[str(g) for g in groups])
             return out
 
+        def _rank_genes_native(self, ad, groupby, groups, reference, *, method,
+                               layer, n, key, use_raw, engine):
+            """Run ``rank_genes_groups`` on a prepared AnnData copy and return the
+            scanpy-native ``uns`` dict, or ``None`` to tell the caller to run the
+            built-in Welch t-test instead.
+
+            ``engine`` selects the compute backend and controls the "am I really
+            using scanpy?" behaviour:
+
+            * ``"auto"`` (default) - scanpy if importable, else **warn** and return
+              ``None`` (Welch t-test). The warning means a fallback is never silent.
+            * ``"scanpy"`` - require scanpy; raise ``ImportError`` if it is missing
+              (never silently falls back).
+            * ``"gpu"`` / ``"cupy"`` - GPU-accelerated Welch t-test via ``cupy``
+              (the per-cell reductions run on the GPU). Returns ``None`` after
+              checking ``cupy`` imports, so the caller runs its GPU t-test path;
+              raises ``ImportError`` if ``cupy`` is missing.
+            * ``"rapids"`` - GPU logistic-regression DE via
+              `rapids-singlecell <https://rapids-singlecell.readthedocs.io/>`_
+              (needs the full RAPIDS stack); raise ``ImportError`` if unavailable.
+            * ``"ttest"`` - skip scanpy entirely and use the built-in (CPU) Welch
+              t-test.
+
+            You can also confirm which engine ran *after the fact* from the result:
+            scanpy leaves a real ``params['method']`` and its
+            ``params['corr_method']`` default (``'benjamini-hochberg'``); the Welch
+            t-test paths (CPU and GPU) stamp ``params['method'] == 't-test'`` and
+            ``params['corr_method'] == 'none'``.
+            """
+            import warnings
+
+            eng = (engine or "auto").lower()
+            if eng in ("cuda",):
+                eng = "gpu"
+            if eng in ("cupy",):
+                eng = "gpu"
+            if eng in ("rapids-singlecell", "rapids_singlecell"):
+                eng = "rapids"
+            if eng not in ("auto", "scanpy", "gpu", "rapids", "ttest"):
+                raise ValueError(
+                    f"engine={engine!r} is not valid; choose 'auto', 'scanpy', "
+                    "'gpu' (cupy), 'rapids' (cuml logreg) or 'ttest'."
+                )
+
+            if eng == "ttest":
+                return None                      # caller runs the CPU Welch t-test
+
+            if eng == "gpu":
+                try:
+                    import cupy  # noqa: F401
+                except ImportError as e:
+                    raise ImportError(
+                        "engine='gpu' needs cupy on a CUDA machine "
+                        "(`pip install cupy-cuda12x`). Use engine='ttest' for the "
+                        "CPU Welch t-test, or engine='scanpy' for scanpy."
+                    ) from e
+                return None                      # caller runs the GPU Welch t-test
+
+            if eng == "rapids":
+                try:
+                    import rapids_singlecell as rsc
+                except ImportError as e:
+                    raise ImportError(
+                        "engine='rapids' needs rapids-singlecell and a CUDA GPU "
+                        "(`pip install rapids-singlecell`, plus RAPIDS/cupy). Use "
+                        "engine='scanpy' for CPU or engine='auto'."
+                    ) from e
+                if method not in (None, "logreg"):
+                    warnings.warn(
+                        f"engine='rapids' accelerates only logreg DE on the GPU; "
+                        f"ignoring method={method!r} and using logreg.",
+                        stacklevel=3,
+                    )
+                rsc.get.anndata_to_GPU(ad)                       # .X -> cupy
+                rsc.tl.rank_genes_groups_logreg(
+                    ad, groupby, groups=groups, reference=reference,
+                    n_genes=n, use_raw=bool(use_raw),
+                )
+                return ad.uns.get("rank_genes_groups")          # rapids' fixed key
+
+            # "auto" or "scanpy"
+            try:
+                import scanpy as sc
+            except ImportError as e:
+                if eng == "scanpy":
+                    raise ImportError(
+                        "engine='scanpy' but scanpy is not installed "
+                        "(`pip install scanpy`). Use engine='ttest' for the "
+                        "built-in Welch t-test."
+                    ) from e
+                warnings.warn(
+                    "diff_expression: scanpy is not installed - falling back to a "
+                    "Welch t-test. Install scanpy (or pass engine='scanpy' to "
+                    "require it; engine='ttest' to silence this).",
+                    stacklevel=3,
+                )
+                return None
+            _layer, _ur = self._pick_expr_matrix(ad, layer, use_raw)
+            sc.tl.rank_genes_groups(
+                ad, groupby, groups=groups, reference=reference, method=method,
+                layer=_layer, n_genes=n, key_added=key, use_raw=_ur,
+            )
+            return ad.uns.get(key)
+
         def diff_expression(self, group_a=None, group_b=None, n=10, layer=None,
-                            method="wilcoxon", key_added=None, use_raw=None):
+                            method="wilcoxon", key_added=None, use_raw=None,
+                            engine="auto"):
             """Top differential genes between two cell groups.
 
             ``group_a`` defaults to the lasso selection; ``group_b`` to the rest.
-            Groups accept integer positions, obs_names, or a boolean mask. When
-            **scanpy** is installed (and the source is an AnnData) this runs
-            ``sc.tl.rank_genes_groups`` on a copy. Otherwise it falls back to a
-            Welch t-test. AnnData/MuData only.
+            Groups accept integer positions, obs_names, or a boolean mask. The
+            ``engine`` argument picks the compute backend (and whether scanpy is
+            *required*): ``"auto"`` uses scanpy when installed and otherwise **warns**
+            before falling back to a Welch t-test; ``"scanpy"`` requires scanpy
+            (raises if missing, never silently falls back); ``"gpu"`` (alias
+            ``"cupy"``) runs a GPU-accelerated Welch t-test via ``cupy``;
+            ``"rapids"`` runs GPU logistic-regression DE via rapids-singlecell;
+            ``"ttest"`` forces the built-in (CPU) Welch t-test. AnnData/MuData
+            only.
 
             **Returns the scanpy-native result** — the ``params`` + rec.array dict
             (``names`` / ``scores`` / ``logfoldchanges`` / ``pvals`` /
@@ -602,35 +744,31 @@ def _make_classes():
             # 'rank_genes_groups' key; key_added overrides; key_added=False disables.
             save_to = (None if key_added is False or not hasattr(src, "uns")
                        else (key_added or "rank_genes_groups"))
+            _key = save_to or "rank_genes_groups"
 
-            # Preferred path: scanpy's rank_genes_groups (AnnData only).
+            # Preferred path: scanpy / rapids rank_genes_groups (AnnData only).
             if type(src).__name__ == "AnnData":
-                try:
-                    import scanpy as sc
-
-                    ad = src.copy()
-                    ad.obs["group"] = pd.Categorical(labels)
-                    _key = save_to or "rank_genes_groups"
-
-                    # Pick the expression matrix so logFC is finite (see helper).
-                    _layer, _ur = self._pick_expr_matrix(ad, layer, use_raw)
-
-                    sc.tl.rank_genes_groups(
-                        ad, "group", groups=["A"], reference=ref,
-                        method=method, layer=_layer, n_genes=n, key_added=_key,
-                        use_raw=_ur,
-                    )
-                    native = ad.uns.get(_key)   # the scanpy-native result dict
+                ad = src.copy()
+                ad.obs["group"] = pd.Categorical(labels)
+                native = self._rank_genes_native(
+                    ad, "group", ["A"], ref, method=method, layer=layer, n=n,
+                    key=_key, use_raw=use_raw, engine=engine,
+                )
+                if native is not None:               # None == "use Welch t-test"
                     if save_to is not None:
                         src.uns[save_to] = native
                     return native
-                except ImportError:
-                    pass  # fall back to the built-in test below
+            elif engine not in ("auto", "ttest", "gpu", "cupy"):
+                raise TypeError(
+                    f"engine={engine!r} needs an AnnData source; got "
+                    f"{type(src).__name__}. Use engine='auto', 'ttest' or 'gpu'."
+                )
 
+            _gpu = str(engine).lower() in ("gpu", "cupy", "cuda")
             a_mask = labels == "A"
             b_mask = labels == ref
             X = src.layers[layer] if layer else src.X
-            res = self._ttest_de(X, a_mask, b_mask, src.var_names, n)
+            res = self._ttest_de(X, a_mask, b_mask, src.var_names, n, gpu=_gpu)
             params = {"groupby": "group", "reference": ref, "method": "t-test",
                       "use_raw": bool(use_raw), "layer": layer, "corr_method": "none"}
             native = self._native_from_ttests({"A": res}, ["A"], params)
@@ -640,7 +778,7 @@ def _make_classes():
 
         def diff_expression_by(self, by, group_a=None, group_b=None, selection=None,
                                n=10, layer=None, method="wilcoxon", key_added=None,
-                               use_raw=None, min_cells=2):
+                               use_raw=None, min_cells=2, engine="auto"):
             """Differential expression BETWEEN the levels of an ``obs`` column,
             restricted to the lasso selection.
 
@@ -755,35 +893,35 @@ def _make_classes():
 
             save_to = (None if key_added is False or not hasattr(src, "uns")
                        else (key_added or "rank_genes_groups"))
+            _key = save_to or "rank_genes_groups"
 
-            # --- scanpy path: ONE rank_genes_groups call on the real `by` column ---
+            # --- scanpy / rapids path: ONE rank_genes_groups call on the real
+            # `by` column (see `engine=` for backend + scanpy-required control) ---
             if type(src).__name__ == "AnnData":
-                try:
-                    import scanpy as sc
-
-                    ad = src[keep].copy()
-                    # rebuild `by` as a clean categorical of just the kept levels,
-                    # keeping the REAL column name so uns[...]['params'] reads true.
-                    ad.obs[by] = pd.Categorical(
-                        ad.obs[by].astype(str),
-                        categories=[str(lv) for lv in keep_levels],
-                    )
-                    _layer, _ur = self._pick_expr_matrix(ad, layer, use_raw)
-                    _key = save_to or "rank_genes_groups"
-                    sc.tl.rank_genes_groups(
-                        ad, by, groups=g_str, reference=ref_str,
-                        method=method, layer=_layer, n_genes=n, key_added=_key,
-                        use_raw=_ur,
-                    )
-                    native = ad.uns.get(_key)   # one clean scanpy-native entry
+                ad = src[keep].copy()
+                # rebuild `by` as a clean categorical of just the kept levels,
+                # keeping the REAL column name so uns[...]['params'] reads true.
+                ad.obs[by] = pd.Categorical(
+                    ad.obs[by].astype(str),
+                    categories=[str(lv) for lv in keep_levels],
+                )
+                native = self._rank_genes_native(
+                    ad, by, g_str, ref_str, method=method, layer=layer, n=n,
+                    key=_key, use_raw=use_raw, engine=engine,
+                )
+                if native is not None:               # None == "use Welch t-test"
                     if save_to is not None:
                         src.uns[save_to] = native
                     return native
-                except ImportError:
-                    pass  # fall through to the Welch t-test
+            elif engine not in ("auto", "ttest", "gpu", "cupy"):
+                raise TypeError(
+                    f"engine={engine!r} needs an AnnData source; got "
+                    f"{type(src).__name__}. Use engine='auto', 'ttest' or 'gpu'."
+                )
 
             # --- no-scanpy fallback: Welch t-test per group vs its reference,
-            # assembled into the SAME scanpy-native structure. ---
+            # assembled into the SAME scanpy-native structure (GPU when asked). ---
+            _gpu = str(engine).lower() in ("gpu", "cupy", "cuda")
             X = src.layers[layer] if layer else src.X
 
             def _mask(level_strs):
@@ -799,7 +937,8 @@ def _make_classes():
                 b_mask = (_mask({s for s in keep_str if s != g})
                           if ref_str == "rest" else _mask({ref_str}))
                 if a_mask.any() and b_mask.any():
-                    results[g] = self._ttest_de(X, a_mask, b_mask, src.var_names, n)
+                    results[g] = self._ttest_de(X, a_mask, b_mask, src.var_names, n,
+                                                gpu=_gpu)
             if not results:
                 raise ValueError("every comparison had an empty side after filtering.")
             params = {"groupby": by, "reference": ref_str, "method": "t-test",

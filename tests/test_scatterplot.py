@@ -4,6 +4,8 @@ gene-aware size_by/opacity_by, and clear error messages.
 Needs the widget stack (anndata + ipywidgets + anywidget); skipped otherwise.
 """
 
+import importlib.util
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -479,3 +481,114 @@ def test_de_by_exposed_on_compose_grid():
     grid = rs.compose([w1, w2], sync=True)
     res = grid.diff_expression_by("condition", n=5)
     assert isinstance(res, dict) and set(res["names"].dtype.names) == {"D30", "Y1", "Y2"}
+
+
+def test_compose_lasso_on_any_panel_reads_back():
+    # Regression: in a linked color_by-list grid, a lasso on a NON-first panel
+    # must reach grid.selection / composition. Each panel is its own anywidget
+    # model, so the JS cross-panel sync only mirrors the *look* (preventEvent) to
+    # the other canvases; the group now reads the last-lassoed panel's model.
+    ad = pytest.importorskip("anndata")
+    rng = np.random.RandomState(0)
+    n, g = 120, 6
+    A = ad.AnnData(
+        X=rng.rand(n, g),
+        obs=pd.DataFrame({"Sample": pd.Categorical(rng.choice(["s1", "s2"], n))},
+                         index=[f"c{i}" for i in range(n)]),
+        var=pd.DataFrame(index=[f"G{i}" for i in range(g)]),
+    )
+    A.obsm["X_umap"] = rng.randn(n, 2)
+    grid = rs.scatterplot(A, basis="X_umap",
+                          color_by=["Sample", "G0", "G1", "G2", "G3", "G4"],
+                          ncols=3, show=False, interactive=True)
+    panels = grid.panels
+    assert len(panels) == 6 and grid._synced
+
+    def _orig(panel, pos):
+        perm = getattr(panel, "_draw_order", None)
+        return sorted(int(perm[p]) for p in pos) if perm is not None else sorted(pos)
+
+    # simulate a lasso on the 4th panel (== JS `model.set("_selection", positions)`)
+    panels[3]._selection = [2, 5, 9, 14]
+    assert grid._active_sel_panel is panels[3]
+    assert sorted(grid.selection) == _orig(panels[3], [2, 5, 9, 14])
+    # composition of that lasso comes from the right panel too
+    assert int(grid.composition("Sample")["count"].sum()) == 4
+
+    # a later lasso on another panel takes over
+    panels[1]._selection = [0, 1]
+    assert grid._active_sel_panel is panels[1]
+    assert sorted(grid.selection) == _orig(panels[1], [0, 1])
+
+
+def test_de_engine_scanpy_actually_ran():
+    # engine='scanpy' -> real scanpy result: its BH correction is recorded in
+    # params, which is how you confirm the Welch fallback did NOT run.
+    pytest.importorskip("scanpy")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    res = w.diff_expression_by("condition", n=5, engine="scanpy")
+    assert res["params"]["corr_method"] != "none"       # scanpy's BH, not the fallback
+    assert res is A.uns["rank_genes_groups"]
+
+
+def test_de_engine_ttest_forces_welch_fallback():
+    # engine='ttest' skips scanpy even when it's installed; the fallback stamps a
+    # recognisable params signature.
+    pytest.importorskip("scanpy")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    res = w.diff_expression(group_a=list(range(40)), n=5, engine="ttest")
+    assert res["params"]["method"] == "t-test"
+    assert res["params"]["corr_method"] == "none"
+    assert set(res["names"].dtype.names) == {"A"}        # still the native shape
+
+
+def test_de_engine_invalid_is_rejected():
+    pytest.importorskip("scanpy")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    with pytest.raises(ValueError, match="engine="):
+        w.diff_expression(group_a=list(range(40)), engine="bogus")
+
+
+def test_de_engine_gpu_matches_cpu():
+    # GPU Welch t-test (cupy) must agree with the CPU Welch t-test to fp, and
+    # return the same scanpy-native shape. Skipped when cupy isn't installed.
+    pytest.importorskip("scanpy")
+    if importlib.util.find_spec("cupy") is None:
+        pytest.skip("cupy not installed - GPU path unavailable")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    ga = list(np.where(A.obs["condition"].to_numpy() == "D30")[0])
+    cpu = w.diff_expression(group_a=ga, n=8, engine="ttest")
+    gpu = w.diff_expression(group_a=ga, n=8, engine="gpu")
+    assert gpu["params"]["method"] == "t-test"          # not scanpy, a t-test
+    assert set(gpu["names"].dtype.names) == {"A"}
+    assert gpu["names"]["A"][0] == cpu["names"]["A"][0]  # same top gene
+    np.testing.assert_allclose(
+        np.asarray(gpu["scores"]["A"], float),
+        np.asarray(cpu["scores"]["A"], float), rtol=1e-5, atol=1e-6,
+    )
+
+
+def test_de_engine_gpu_without_cupy_raises_clearly():
+    pytest.importorskip("scanpy")
+    if importlib.util.find_spec("cupy") is not None:
+        pytest.skip("cupy is installed; the GPU path would run")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    with pytest.raises(ImportError, match="cupy"):
+        w.diff_expression(group_a=list(range(40)), engine="gpu")
+
+
+def test_de_engine_rapids_without_gpu_raises_clearly():
+    # No CUDA/rapids-singlecell here -> a clear ImportError naming the fix,
+    # never a silent CPU fallback.
+    pytest.importorskip("scanpy")
+    if importlib.util.find_spec("rapids_singlecell") is not None:
+        pytest.skip("rapids-singlecell is installed; the GPU path would run")
+    A = _de_anndata()
+    w = rs.scatterplot(A, x="X_umap", color_by="condition", show=False, interactive=True)
+    with pytest.raises(ImportError, match="rapids-singlecell"):
+        w.diff_expression(group_a=list(range(40)), engine="rapids")

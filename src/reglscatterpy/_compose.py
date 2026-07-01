@@ -157,7 +157,40 @@ def compose(plots: Sequence, cols: Optional[int] = None, sync="auto"):
     )
     grid._panels = plots
     grid._synced = do_sync
+    if do_sync:
+        _track_active_panel(grid, plots)
     return grid
+
+
+def _track_active_panel(grid, panels):
+    """Remember which panel the user last lassoed / filtered.
+
+    Each panel is a SEPARATE anywidget model: a lasso on panel *i* updates only
+    *that* panel's ``_selection`` trait (the cross-panel sync mirrors the look to
+    the other canvases with ``preventEvent``, so their models stay empty). Without
+    this, ``grid.selection`` — which reads a single "primary" panel — would see a
+    lasso only on the first panel. Observing every panel's ``_selection`` /
+    ``_filtered_on`` lets the group read back from whichever panel was actually
+    used."""
+    grid._active_sel_panel = None
+    grid._active_filter_panel = None
+
+    def _on_sel(change):
+        if change.new:                       # a real (non-empty) lasso on this panel
+            grid._active_sel_panel = change.owner
+
+    def _on_filter(change):
+        if change.new:                       # a filter went active on this panel
+            grid._active_filter_panel = change.owner
+
+    for p in panels:
+        if not callable(getattr(p, "observe", None)):
+            continue
+        try:
+            p.observe(_on_sel, names="_selection")
+            p.observe(_on_filter, names="_filtered_on")
+        except Exception:
+            pass
 
 
 _COMPOSED_CLS = None
@@ -194,10 +227,34 @@ def _composed_plots_class():
                     return p                      # first live panel
             return self._panels[0]
 
+        @staticmethod
+        def _has_selection(p):
+            if list(getattr(p, "_selection", []) or []):
+                return True
+            vp = getattr(p, "_vp", None)         # progressive: logical sel lives here
+            return bool(vp and vp.get("sel"))
+
+        @property
+        def _sel_panel(self):
+            """Read a selection / analysis from the panel the user LAST lassoed
+            (each panel has its own model), falling back to the primary."""
+            ap = getattr(self, "_active_sel_panel", None)
+            if ap is not None and self._has_selection(ap):
+                return ap
+            return self._primary
+
+        @property
+        def _filter_panel(self):
+            ap = getattr(self, "_active_filter_panel", None)
+            if ap is not None and getattr(ap, "_filtered_on", False):
+                return ap
+            return self._primary
+
         @property
         def selection(self):
-            """The group's lasso selection (original indices) — assignable to all panels."""
-            return self._primary.selection
+            """The group's lasso selection (original indices) — from whichever panel
+            was last lassoed; assignable to all panels."""
+            return self._sel_panel.selection
 
         @selection.setter
         def selection(self, value):
@@ -210,22 +267,22 @@ def _composed_plots_class():
         @property
         def filtered(self):
             """Original indices passing the group's (synced) filters."""
-            return self._primary.filtered
+            return self._filter_panel.filtered
 
         def subset(self, *a, **k):
-            return self._primary.subset(*a, **k)
+            return self._sel_panel.subset(*a, **k)
 
         def diff_expression(self, *a, **k):
-            return self._primary.diff_expression(*a, **k)
+            return self._sel_panel.diff_expression(*a, **k)
 
         def diff_expression_by(self, *a, **k):
-            return self._primary.diff_expression_by(*a, **k)
+            return self._sel_panel.diff_expression_by(*a, **k)
 
         def composition(self, *a, **k):
-            return self._primary.composition(*a, **k)
+            return self._sel_panel.composition(*a, **k)
 
         def annotate(self, *a, **k):
-            return self._primary.annotate(*a, **k)
+            return self._sel_panel.annotate(*a, **k)
 
         def highlight(self, *a, **k):
             for p in self._panels:
