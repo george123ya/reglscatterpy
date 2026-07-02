@@ -19,6 +19,7 @@ in **Jupyter, JupyterLab, VS Code and Colab**.
 </p>
 
 ▶️ **[Try the live demo (real pbmc3k, no install) →](https://george123ya.github.io/reglscatterpy/demo/)**
+ ·  📓 **[Examples cookbook (24 runnable snippets) →](https://nbviewer.org/github/george123ya/reglscatterpy/blob/main/notebooks/reglscatterpy_examples.ipynb)**
  ·  📖 **[Full docs & API reference →](https://george123ya.github.io/reglscatterpy/)**
 
 Under the hood it renders with [`regl-scatterplot`](https://github.com/flekschas/regl-scatterplot)
@@ -70,10 +71,28 @@ rs.scatterplot(df, x="x", y="y", color_by="ct")
 | **`filter_by` distribution sliders** | **Linked grid (`compose`)** |
 | ![Range-filter sliders with histograms](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/filter-sliders.png) | ![Two embeddings with synced camera and selection](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/linked-grid.png) |
 
-The UMAP panels are rendered from **real pbmc3k** (2,638 PBMCs). You can
+All panels are rendered from **real pbmc3k** (2,638 PBMCs). You can
 regenerate the figures and the
 [live demo](https://george123ya.github.io/reglscatterpy/demo/) with the
 maintainer scripts — see [`scripts/README.md`](https://github.com/george123ya/reglscatterpy/blob/main/scripts/README.md).
+
+## See it in action
+
+**Markers of a selection** — lasso a population and call `diff_expression`; you
+get scanpy-native results (here, the T-cell markers of a lassoed T/NK region).
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/diff-expression.gif"
+       alt="Lasso a cluster and get its differential-expression markers" width="700">
+</p>
+
+**Morph between embeddings** — cells glide from a UMAP into their tissue
+coordinates and back, with colour and selection carried through the transition.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/morph.gif"
+       alt="Morph a UMAP into spatial tissue coordinates" width="700">
+</p>
 
 ## The fun part: lasso, then ask questions
 
@@ -323,6 +342,11 @@ exported HTML. To make the live widget follow your notebook, pass `theme=`:
 rs.scatterplot(adata, basis="umap", color="leiden", theme="auto")   # dark in a dark theme
 rs.scatterplot(adata, basis="umap", color="leiden", theme="dark")   # always dark
 ```
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/theme-dark.png"
+       alt="Dark-theme figure card" width="520">
+</p>
 
 - `"light"` (default) — white card.
 - `"dark"` — dark card with light axes/legend.
