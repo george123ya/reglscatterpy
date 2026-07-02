@@ -18,9 +18,13 @@ in **Jupyter, JupyterLab, VS Code and Colab**.
        alt="Panning, lassoing and legend-filtering an interactive UMAP" width="760">
 </p>
 
-▶️ **[Try the live demo (real pbmc3k, no install) →](https://george123ya.github.io/reglscatterpy/demo/)**
- ·  📓 **[Examples cookbook (24 runnable snippets) →](https://nbviewer.org/github/george123ya/reglscatterpy/blob/main/notebooks/reglscatterpy_examples.ipynb)**
- ·  📖 **[Full docs & API reference →](https://george123ya.github.io/reglscatterpy/)**
+<p align="center">
+  <a href="https://george123ya.github.io/reglscatterpy/demo/"><b>Live demo</b></a>
+  &nbsp;•&nbsp;
+  <a href="https://nbviewer.org/github/george123ya/reglscatterpy/blob/main/notebooks/reglscatterpy_examples.ipynb"><b>Examples</b></a>
+  &nbsp;•&nbsp;
+  <a href="https://george123ya.github.io/reglscatterpy/"><b>Documentation</b></a>
+</p>
 
 Under the hood it renders with [`regl-scatterplot`](https://github.com/flekschas/regl-scatterplot)
 (WebGL), and it's the Python twin of the R package
@@ -35,7 +39,7 @@ pip install reglscatterpy            # numpy, pandas, anywidget
 pip install anndata                  # for AnnData; mudata / spatialdata as needed
 ```
 
-## A 60-second tour
+## Quick start
 
 Give it an AnnData, say which embedding to show (`basis=`) and what to colour by
 — an `obs` column **or a gene name**. That's it:
@@ -65,16 +69,31 @@ rs.scatterplot(df, x="x", y="y", color_by="ct")
 
 ## Gallery
 
-| Categorical colouring | Continuous (gene) colouring |
-|---|---|
-| ![Categorical UMAP with frosted legend](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/umap-categorical.png) | ![Gene-expression UMAP with colour bar](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/umap-continuous.png) |
-| **`filter_by` distribution sliders** | **Linked grid (`compose`)** |
-| ![Range-filter sliders with histograms](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/filter-sliders.png) | ![Two embeddings with synced camera and selection](https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/linked-grid.png) |
+<table width="100%">
+  <tr>
+    <td width="50%" align="center">
+      <img src="https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/umap-categorical.png" width="100%"><br>
+      <sub>Categorical colouring</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/umap-continuous.png" width="100%"><br>
+      <sub>Continuous (gene) colouring</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/filter-sliders.png" width="100%"><br>
+      <sub><code>filter_by</code> distribution sliders</sub>
+    </td>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/george123ya/reglscatterpy/main/assets/linked-grid.png" width="100%"><br>
+      <sub>Linked grid (<code>compose</code>)</sub>
+    </td>
+  </tr>
+</table>
 
-All panels are rendered from **real pbmc3k** (2,638 PBMCs). You can
-regenerate the figures and the
-[live demo](https://george123ya.github.io/reglscatterpy/demo/) with the
-maintainer scripts — see [`scripts/README.md`](https://github.com/george123ya/reglscatterpy/blob/main/scripts/README.md).
+<sub>All panels are rendered from real pbmc3k (2,638 PBMCs) — regenerate them with
+the <a href="https://github.com/george123ya/reglscatterpy/blob/main/scripts/README.md">maintainer scripts</a>.</sub>
 
 ## See it in action
 
@@ -94,7 +113,7 @@ coordinates and back, with colour and selection carried through the transition.
        alt="Morph a UMAP into spatial tissue coordinates" width="700">
 </p>
 
-## The fun part: lasso, then ask questions
+## Selections and analysis
 
 The point of an interactive plot is the **round-trip** — circle some cells and
 keep working with them in Python. Pass `interactive=True` to get the live,
@@ -201,7 +220,7 @@ The active filter, legend selection, colours and lasso are **kept through the
 transition**. (Atlas-scale `progressive=True` plots don't morph — the point set
 isn't fully resident.)
 
-## Small-multiples and linked views
+## Linked views
 
 Colour one embedding by **several genes / columns at once** — pass a list and
 you get a linked grid, one panel per value, with camera + lasso kept in sync:
@@ -358,7 +377,7 @@ back). A per-call `theme=` overrides the global; an explicit `background_color=`
 / `axis_color=` always wins. The theme only affects the **live** widget; an
 exported `.html` stays portably light.
 
-## More knobs worth knowing
+## Additional options
 
 **Richer tooltips** — show extra fields (obs columns or genes) on hover:
 
