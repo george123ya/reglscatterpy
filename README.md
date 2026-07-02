@@ -1,6 +1,7 @@
 # reglscatterpy
 
 [![PyPI](https://img.shields.io/pypi/v/reglscatterpy.svg)](https://pypi.org/project/reglscatterpy/)
+[![Bioconda](https://img.shields.io/conda/vn/bioconda/reglscatterpy.svg?label=bioconda&color=brightgreen)](https://anaconda.org/bioconda/reglscatterpy)
 [![Python versions](https://img.shields.io/pypi/pyversions/reglscatterpy.svg)](https://pypi.org/project/reglscatterpy/)
 [![Docs](https://img.shields.io/badge/docs-github.io-blue.svg)](https://george123ya.github.io/reglscatterpy/)
 [![Live demo](https://img.shields.io/badge/live%20demo-pbmc3k-brightgreen.svg)](https://george123ya.github.io/reglscatterpy/demo/)
@@ -37,6 +38,12 @@ and Python.
 ```bash
 pip install reglscatterpy            # numpy, pandas, anywidget
 pip install anndata                  # for AnnData; mudata / spatialdata as needed
+```
+
+…or with conda / mamba from **bioconda**:
+
+```bash
+conda install -c bioconda -c conda-forge reglscatterpy
 ```
 
 ## Quick start
