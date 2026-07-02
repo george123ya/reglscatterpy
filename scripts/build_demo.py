@@ -15,12 +15,11 @@ import scanpy as sc
 import reglscatterpy as rs
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA = ROOT / "notebooks" / "data" / "pbmc3k_processed.h5ad"
 OUT = ROOT / "docs" / "demo_plot.html"
 
 
 def main():
-    adata = sc.read_h5ad(DATA)
+    adata = sc.datasets.pbmc3k_processed()   # downloads once
     # A single, full-width interactive embedding of real PBMCs: pan / zoom / lasso
     # and toggle cell types in the legend. (A single panel renders reliably even
     # in headless SwiftShader; a linked compose() grid works in a real browser but

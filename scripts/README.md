@@ -1,8 +1,8 @@
 # Maintainer scripts
 
-Tools for regenerating the README figures and the live docs demo from **real
-pbmc3k** data (`notebooks/data/pbmc3k_processed.h5ad`), not synthetic toy data.
-None of these are runtime dependencies — they need the dev extras plus a
+Tools for regenerating the README figures and the live docs demo from real
+pbmc3k data (downloaded via `sc.datasets.pbmc3k_processed()`), not synthetic toy
+data. None of these are runtime dependencies; they need the dev extras plus a
 `chromium` on `PATH` and (for stills) Pillow.
 
 ## `build_demo.py` — the live GitHub Pages demo

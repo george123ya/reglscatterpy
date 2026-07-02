@@ -12,7 +12,6 @@ dist/
 # Big source data — NOT for the repo. data-raw/ holds the multi-GB source
 # .h5ad atlases; the generation scripts (build_tour.py, make_palettes.R) ARE kept.
 *.h5ad
-!notebooks/data/pbmc3k_processed.h5ad
 /data/
 
 # Docs build

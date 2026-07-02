@@ -21,7 +21,6 @@ import scanpy as sc
 import reglscatterpy as rs
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA = ROOT / "notebooks" / "data" / "pbmc3k_processed.h5ad"
 ASSETS = ROOT / "assets"
 CAPTURE = ROOT / "scripts" / "_capture_frames.mjs"
 
@@ -69,7 +68,7 @@ def assemble(outdir, gif, fps, width):
 
 def main():
     ASSETS.mkdir(exist_ok=True)
-    adata = sc.read_h5ad(DATA)
+    adata = sc.datasets.pbmc3k_processed()   # downloads once
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)
         for shot in SHOTS:

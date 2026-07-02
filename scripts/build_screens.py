@@ -19,7 +19,6 @@ from PIL import Image
 import reglscatterpy as rs
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA = ROOT / "notebooks" / "data" / "pbmc3k_processed.h5ad"
 ASSETS = ROOT / "assets"
 
 CHROME = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome-stable")
@@ -60,7 +59,7 @@ def autocrop(png: pathlib.Path, pad=12, bg=(255, 255, 255)):
 
 def main():
     ASSETS.mkdir(exist_ok=True)
-    adata = sc.read_h5ad(DATA)
+    adata = sc.datasets.pbmc3k_processed()   # downloads once
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)
         for name, kw in PANELS:
